@@ -153,9 +153,7 @@ tabs.db
 *.sqlite
 *.db-journal
 
-# ===== Build Artifacts =====
-backend/dist/
-extension/dist/
+
 
 # ===== Chrome Extension Artifacts =====
 extension/*.zip
