@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "TabChat",
+  "version": "1.0",
+  "description": "TabChat",
+  "permissions": ["tabs", "debugger", "storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "dist/popup.html",
+    "default_icon": {}
+  },
+  "background": {
+    "service_worker": "dist/background.js"
+  }
+}

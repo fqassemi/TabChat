@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    // مسیر فایل‌های اصلی و خروجی
+    "rootDir": "src",
+    "outDir": "dist",
+
+    // تنظیمات ماژول و خروجی JS
+    "module": "esnext",
+    "moduleResolution": "node",
+    "target": "es2020",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // بررسی سختگیرانه TypeScript
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
+    // برای دیباگ و توسعه
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+
+    // انواع تایپ‌ها
+    "types": ["node", "express"]
+  },
+  "include": ["src"]
+}

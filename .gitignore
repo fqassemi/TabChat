@@ -137,3 +137,26 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+
+# ===== Environment variables =====
+.env.local
+.env.*.local
+
+# ===== OS / IDE =====
+.DS_Store
+.vscode/
+.idea/
+
+# ===== Databases / temp files =====
+tabs.db
+*.sqlite
+*.db-journal
+
+# ===== Build Artifacts =====
+backend/dist/
+extension/dist/
+
+# ===== Chrome Extension Artifacts =====
+extension/*.zip
+extension/*.crx
