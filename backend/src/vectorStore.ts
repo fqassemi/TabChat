@@ -1,8 +1,12 @@
 import "dotenv/config";
+import fs from "fs";
+import path from "path";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { FaissStore } from "@langchain/community/vectorstores/faiss";
 import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+
+const DATA_PATH = path.resolve("./data/faiss.index");
 
 let vectorStore: FaissStore | null = null;
 let embeddings: OpenAIEmbeddings | null = null;
@@ -14,8 +18,15 @@ export async function initVectorStore() {
     model: "text-embedding-3-large",
   });
 
-  vectorStore = new FaissStore(embeddings, {});
-  console.log("🧠 FAISS Vector Store initialized");
+  if (fs.existsSync(DATA_PATH)) {
+    console.log("📂 Loading existing FAISS index...");
+    vectorStore = await FaissStore.load(DATA_PATH, embeddings);
+  } else {
+    console.log("🧠 Creating new FAISS index...");
+    vectorStore = new FaissStore(embeddings, {});
+  }
+
+  console.log("✅ FAISS Vector Store ready");
   return vectorStore;
 }
 
@@ -53,7 +64,10 @@ export async function addDocsToVectorStore(
     await vectorStore.addDocuments(documents);
   }
 
-  console.log(`✅ Added ${docs.length} docs (${totalChunks} chunks) to vector store`);
+  // 🔹 ذخیره روی دیسک
+  await vectorStore.save(DATA_PATH);
+
+  console.log(`💾 Saved FAISS index to ${DATA_PATH} (${docs.length} docs, ${totalChunks} chunks)`);
 }
 
 // ------------------ Semantic search ------------------
@@ -65,6 +79,6 @@ export async function searchSimilar(query: string, k = 5) {
   return results.map((r) => ({
     title: r.metadata?.title,
     url: r.metadata?.url,
-    text: r.pageContent, // 🔹 حالا محتوای واقعی برگردونده میشه
+    text: r.pageContent, // محتوای واقعی هر چانک برگردانده میشه
   }));
 }
