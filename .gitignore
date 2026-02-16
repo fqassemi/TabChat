@@ -157,3 +157,5 @@ tabs.db
 # ===== Chrome Extension Artifacts =====
 extension/*.zip
 extension/*.crx
+
+data/
