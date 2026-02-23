@@ -1,119 +1,178 @@
+// popup.ts
 const SERVER = "http://localhost:8000";
+
+interface DBConfig {
+  type: "supabase" | "local" | "sqlite";
+  supabaseUrl?: string;
+  supabaseKey?: string;
+  localDbUrl?: string;
+  sqlitePath?: string;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   const collect = document.getElementById("collect") as HTMLButtonElement;
-  const searchBtn = document.getElementById("searchBtn") as HTMLButtonElement;
   const chatBtn = document.getElementById("chatBtn") as HTMLButtonElement;
-  const searchInput = document.getElementById("search") as HTMLInputElement;
+  const openOverlayBtn = document.getElementById("openOverlay") as HTMLButtonElement;
   const status = document.getElementById("status") as HTMLDivElement;
-  const resultsDiv = document.getElementById("results") as HTMLDivElement;
 
-  // ------------------ جمع‌آوری تب‌ها ------------------
-  collect.addEventListener("click", async () => {
-    status.textContent = "Collecting tabs...";
-    const tabs = await new Promise<chrome.tabs.Tab[]>((res) =>
-      chrome.tabs.query({}, res)
-    );
+  const dbSelect = document.getElementById("dbSelect") as HTMLSelectElement;
+  const supabaseConfig = document.getElementById("supabaseConfig") as HTMLDivElement;
+  const localConfig = document.getElementById("localConfig") as HTMLDivElement;
+  const sqliteConfig = document.getElementById("sqliteConfig") as HTMLDivElement;
+  const saveConfig = document.getElementById("saveConfig") as HTMLButtonElement;
+  const configStatus = document.getElementById("configStatus") as HTMLDivElement;
 
-    const docs: { title: string; url: string; text?: string }[] = [];
+  const openaiKeyInput = document.getElementById("openaiKey") as HTMLInputElement;
+  const saveApiKeyBtn = document.getElementById("saveApiKey") as HTMLButtonElement;
+  const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLDivElement;
 
-    for (const t of tabs) {
-      if (!t.id || !t.url || !t.url.startsWith("http")) continue;
+  console.log("Popup loaded ✅");
 
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: t.id },
-          files: ["dist/content.js"],
-        });
+  // Change form based on selected database type
+  dbSelect.addEventListener("change", () => {
+    supabaseConfig.style.display = dbSelect.value === "supabase" ? "block" : "none";
+    localConfig.style.display = dbSelect.value === "local" ? "block" : "none";
+    sqliteConfig.style.display = dbSelect.value === "sqlite" ? "block" : "none";
+  });
 
-        const text: string = await new Promise((res) => {
-          chrome.tabs.sendMessage(t.id!, { type: "getText" }, (response) => {
-            res(response || "");
-          });
-        });
+  // Load saved settings
+  chrome.storage.local.get(["dbConfig", "openaiKey"], (data) => {
+    const conf = (data.dbConfig as DBConfig) || { type: "sqlite" };
+    dbSelect.value = conf.type;
 
-        docs.push({ title: t.title || "", url: t.url, text });
-      } catch (err) {
-        console.warn("❌ Error reading tab:", t.url, err);
-      }
+    if (conf.type === "supabase") {
+      supabaseConfig.style.display = "block";
+      (document.getElementById("supabaseUrl") as HTMLInputElement).value = conf.supabaseUrl || "";
+      (document.getElementById("supabaseKey") as HTMLInputElement).value = conf.supabaseKey || "";
+    } else if (conf.type === "local") {
+      localConfig.style.display = "block";
+      (document.getElementById("localDbUrl") as HTMLInputElement).value = conf.localDbUrl || "";
+    } else if (conf.type === "sqlite") {
+      sqliteConfig.style.display = "block";
+      (document.getElementById("sqlitePath") as HTMLInputElement).value = conf.sqlitePath || "";
+    }
+
+    if (data.openaiKey) openaiKeyInput.value = "********";
+  });
+
+  // Save API Key
+  saveApiKeyBtn.addEventListener("click", () => {
+    const key = openaiKeyInput.value.trim();
+    if (!key.startsWith("sk-")) {
+      apiKeyStatus.textContent = "❌ Invalid API key format.";
+      return;
+    }
+    chrome.storage.local.set({ openaiKey: key }, () => {
+      apiKeyStatus.textContent = "✅ API key saved locally.";
+    });
+  });
+
+  // Save database configuration
+  saveConfig.addEventListener("click", async () => {
+    const selected = dbSelect.value as DBConfig["type"];
+    let payload: Partial<DBConfig> = { type: selected };
+
+    if (selected === "supabase") {
+      const supabaseUrl = (document.getElementById("supabaseUrl") as HTMLInputElement).value.trim();
+      const supabaseKey = (document.getElementById("supabaseKey") as HTMLInputElement).value.trim();
+      payload = { ...payload, supabaseUrl, supabaseKey };
+    } else if (selected === "local") {
+      const localDbUrl = (document.getElementById("localDbUrl") as HTMLInputElement).value.trim();
+      payload = { ...payload, localDbUrl };
+    } else if (selected === "sqlite") {
+      const sqlitePath = (document.getElementById("sqlitePath") as HTMLInputElement).value.trim();
+      payload = { ...payload, sqlitePath };
     }
 
     try {
-      const r = await fetch(`${SERVER}/ingest`, {
+      const res = await fetch(`${SERVER}/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docs }),
+        body: JSON.stringify(payload),
       });
-      const j = await r.json();
-      status.textContent = `Inserted: ${j.inserted || docs.length}`;
-    } catch (e) {
-      console.error(e);
-      status.textContent = "Error sending to server";
-    }
-  });
-
-  // ------------------ جستجو ------------------
-  searchBtn.addEventListener("click", async () => {
-    const q = searchInput.value.trim();
-    if (!q) return;
-
-    status.textContent = "Searching...";
-    searchBtn.disabled = true;
-    resultsDiv.innerHTML = "";
-
-    try {
-      const r = await fetch(`${SERVER}/search?q=${encodeURIComponent(q)}`);
-      const j = await r.json();
-
-      const results = j.results as { title: string; url: string; score: number }[];
-
-      const grouped = results.reduce((acc, r) => {
-        if (!acc[r.url]) acc[r.url] = { ...r, scores: [r.score] };
-        else acc[r.url].scores.push(r.score);
-        return acc;
-      }, {} as Record<string, { title: string; url: string; scores: number[] }>);
-
-      const finalResults = Object.values(grouped).map((r) => ({
-        title: r.title,
-        url: r.url,
-        score: r.scores.reduce((a, b) => a + b, 0) / r.scores.length,
-      }));
-
-      finalResults.sort((a, b) => b.score - a.score);
-
-      resultsDiv.innerHTML = finalResults
-        .map(
-          (r) => `
-          <div>
-            <a href="${r.url}" target="_blank">${r.title}</a>
-            <small>(${r.score.toFixed(2)})</small>
-          </div>`
-        )
-        .join("");
-
-      status.textContent = `Found ${finalResults.length} result(s)`;
+      const json = await res.json();
+      if (json.ok) configStatus.textContent = `✅ Database configured: ${json.mode}`;
+      else configStatus.textContent = `❌ Server error: ${json.error || "Unknown error"}`;
+      chrome.storage.local.set({ dbConfig: payload });
     } catch (err) {
-      console.error(err);
-      status.textContent = "Search error";
-    } finally {
-      searchBtn.disabled = false;
+      configStatus.textContent = "❌ Error connecting to server.";
     }
   });
 
-  // ------------------ باز کردن Chat روی تب فعلی ------------------
+  // Collect tabs
+  collect.addEventListener("click", async () => {
+    status.textContent = "Collecting tabs...";
+
+    chrome.storage.local.get(["openaiKey"], async (data) => {
+      const apiKey = data.openaiKey;
+      if (!apiKey) {
+        status.textContent = "❌ Please enter your OpenAI API key first.";
+        return;
+      }
+
+      const tabs = await new Promise<chrome.tabs.Tab[]>((res) => chrome.tabs.query({}, res));
+      const docs = tabs
+        .filter((t) => t.url?.startsWith("http"))
+        .map((t) => ({ title: t.title || "", url: t.url! }));
+
+      try {
+        const r = await fetch(`${SERVER}/ingest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ docs, apiKey }),
+        });
+        const j = await r.json();
+
+        // 🔹 Handle different responses:
+        if (!j.ok) {
+          status.textContent = j.error || "❌ Error during processing.";
+        }
+        else if (j.message) {
+          // Server returned a custom message (e.g., "All tabs already saved")
+          status.textContent = j.message;
+        }
+        else if (typeof j.count === "number") {
+          // Default: show number of tabs saved
+          status.textContent = `✅ ${j.count} tabs saved.`;
+        }
+        else {
+          status.textContent = "✅ Operation completed successfully.";
+        }
+
+      } catch (e) {
+        console.error("❌ Fetch error:", e);
+        status.textContent = "❌ Error connecting to server.";
+      }
+    });
+  });
+
+  // Open overlay
+  openOverlayBtn.addEventListener("click", async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["dist/overlay.js"],
+    });
+
+    chrome.tabs.sendMessage(tab.id, { action: "openSearchOverlay" });
+
+    // Close popup after injection
+    window.close();
+  });
+
+  // Open chat widget
   chatBtn.addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.id) return;
+    if (!tab?.id) return;
 
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["dist/chatWidget.js"], // chatWidget باید کد JS چت باشه
-      });
-      status.textContent = "Chat opened on this tab.";
-    } catch (err) {
-      console.error(err);
-      status.textContent = "Failed to open chat.";
-    }
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["dist/chatWidget.js"],
+    });
+
+    chrome.tabs.sendMessage(tab.id, { action: "openChatWidget" });
+    status.textContent = "✅ Chat widget opened.";
   });
 });

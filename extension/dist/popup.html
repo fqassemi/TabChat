@@ -3,15 +3,74 @@
 <head>
   <meta charset="utf-8" />
   <title>Tab RAG</title>
-  <script src="popup.js" defer></script> <!-- خروجی dist -->
+  <script src="popup.js" defer></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 10px;
+      width: 340px;
+    }
+    label { font-weight: bold; }
+    input, select, button {
+      width: 100%;
+      margin-top: 4px;
+      margin-bottom: 10px;
+      padding: 6px;
+    }
+    hr { margin: 12px 0; }
+    #status, #configStatus, #apiKeyStatus {
+      color: #444;
+      font-size: 13px;
+      margin-top: 6px;
+    }
+  </style>
 </head>
 <body>
+  <h3>Database Configuration</h3>
+
+  <label>Database Type:</label>
+  <select id="dbSelect">
+    <option value="supabase">Supabase</option>
+    <option value="local">Postgres (Local)</option>
+    <option value="sqlite">SQLite</option>
+  </select>
+
+  <div id="supabaseConfig" style="display:none;">
+    <label>Supabase URL:</label>
+    <input type="text" id="supabaseUrl" placeholder="https://xyz.supabase.co" />
+    <label>Service Role Key:</label>
+    <input type="password" id="supabaseKey" placeholder="SUPABASE_SERVICE_ROLE_KEY" />
+  </div>
+
+  <div id="localConfig" style="display:none;">
+    <label>Postgres Connection String:</label>
+    <input type="text" id="localDbUrl" placeholder="postgresql://user:pass@localhost:5432/dbname" />
+  </div>
+
+  <div id="sqliteConfig" style="display:none;">
+    <label>SQLite File Path:</label>
+    <input type="text" id="sqlitePath" placeholder="/Users/nima/Desktop/local.sqlite" />
+  </div>
+
+  <button id="saveConfig">Save Config</button>
+  <div id="configStatus"></div>
+
+  <hr />
+
+  <h3>LLM Configuration</h3>
+  <label>OpenAI API Key:</label>
+  <input type="password" id="openaiKey" placeholder="sk-..." />
+  <button id="saveApiKey">Save API Key</button>
+  <div id="apiKeyStatus"></div>
+
+  <hr />
+
   <button id="collect">جمع‌آوری تب‌ها</button>
-  <input type="text" id="search" placeholder="Search..." />
-  <button id="searchBtn">Search</button>
+  <button id="openOverlay">باز کردن جستجو در تب‌ها</button>
+  <button id="chatBtn">Open Chat for This Tab</button>
+
   <div id="status"></div>
   <hr>
   <div id="results"></div>
-  <button id="chatBtn">Open Chat for This Tab</button>
 </body>
 </html>
