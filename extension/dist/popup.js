@@ -15,6 +15,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const openaiKeyInput = document.getElementById("openaiKey");
     const saveApiKeyBtn = document.getElementById("saveApiKey");
     const apiKeyStatus = document.getElementById("apiKeyStatus");
+    const moorchehKeyInput = document.getElementById("moorchehKey");
+    const moorchehNamespaceInput = document.getElementById("moorchehNamespace");
+    const saveMoorchehBtn = document.getElementById("saveMoorcheh");
+    const moorchehStatus = document.getElementById("moorchehStatus");
     console.log("Popup loaded ✅");
     // Change form based on selected database type
     dbSelect.addEventListener("change", () => {
@@ -23,7 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
         sqliteConfig.style.display = dbSelect.value === "sqlite" ? "block" : "none";
     });
     // Load saved settings
-    chrome.storage.local.get(["dbConfig", "openaiKey"], (data) => {
+    chrome.storage.local.get(["dbConfig", "openaiKey", "moorchehKey", "moorchehNamespace"], (data) => {
         const conf = data.dbConfig || { type: "sqlite" };
         dbSelect.value = conf.type;
         if (conf.type === "supabase") {
@@ -41,8 +45,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (data.openaiKey)
             openaiKeyInput.value = "********";
+        if (data.moorchehKey)
+            moorchehKeyInput.value = "********";
+        moorchehNamespaceInput.value = (data?.moorchehNamespace ?? "");
     });
-    // Save API Key
+    // Save API Key (OpenAI)
     saveApiKeyBtn.addEventListener("click", () => {
         const key = openaiKeyInput.value.trim();
         if (!key.startsWith("sk-")) {
@@ -50,7 +57,19 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
         chrome.storage.local.set({ openaiKey: key }, () => {
-            apiKeyStatus.textContent = "✅ API key saved locally.";
+            apiKeyStatus.textContent = "✅ OpenAI API key saved locally.";
+        });
+    });
+    // Save Moorcheh Config
+    saveMoorchehBtn.addEventListener("click", () => {
+        const moorKey = moorchehKeyInput.value.trim();
+        const ns = moorchehNamespaceInput.value.trim();
+        if (!ns) {
+            moorchehStatus.textContent = "❌ Namespace is required.";
+            return;
+        }
+        chrome.storage.local.set({ moorchehKey: moorKey, moorchehNamespace: ns }, () => {
+            moorchehStatus.textContent = "✅ Moorcheh configuration saved.";
         });
     });
     // Save database configuration
@@ -90,8 +109,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Collect tabs
     collect.addEventListener("click", async () => {
         status.textContent = "Collecting tabs...";
-        chrome.storage.local.get(["openaiKey"], async (data) => {
+        chrome.storage.local.get(["openaiKey", "moorchehKey", "moorchehNamespace"], async (data) => {
             const apiKey = data.openaiKey;
+            const moorchehKey = data.moorchehKey;
+            const moorchehNamespace = data.moorchehNamespace;
             if (!apiKey) {
                 status.textContent = "❌ Please enter your OpenAI API key first.";
                 return;
@@ -104,23 +125,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 const r = await fetch(`${SERVER}/ingest`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ docs, apiKey }),
+                    body: JSON.stringify({ docs, apiKey, moorchehKey, moorchehNamespace }),
                 });
                 const j = await r.json();
-                // 🔹 Handle different responses:
                 if (!j.ok) {
                     status.textContent = j.error || "❌ Error during processing.";
                 }
-                else if (j.message) {
-                    // Server returned a custom message (e.g., "All tabs already saved")
-                    status.textContent = j.message;
-                }
-                else if (typeof j.count === "number") {
-                    // Default: show number of tabs saved
-                    status.textContent = `✅ ${j.count} tabs saved.`;
-                }
                 else {
-                    status.textContent = "✅ Operation completed successfully.";
+                    status.textContent = j.message || `✅ ${j.count} tabs saved.`;
                 }
             }
             catch (e) {
@@ -139,7 +151,6 @@ document.addEventListener("DOMContentLoaded", () => {
             files: ["dist/overlay.js"],
         });
         chrome.tabs.sendMessage(tab.id, { action: "openSearchOverlay" });
-        // Close popup after injection
         window.close();
     });
     // Open chat widget

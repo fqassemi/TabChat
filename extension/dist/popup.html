@@ -18,7 +18,7 @@
       padding: 6px;
     }
     hr { margin: 12px 0; }
-    #status, #configStatus, #apiKeyStatus {
+    #status, #configStatus, #apiKeyStatus, #moorchehStatus {
       color: #444;
       font-size: 13px;
       margin-top: 6px;
@@ -62,6 +62,18 @@
   <input type="password" id="openaiKey" placeholder="sk-..." />
   <button id="saveApiKey">Save API Key</button>
   <div id="apiKeyStatus"></div>
+
+  <hr />
+
+  <h3>Moorcheh Configuration</h3>
+  <label>Moorcheh API Key:</label>
+  <input type="password" id="moorchehKey" placeholder="moor-..." />
+
+  <label>Namespace:</label>
+  <input type="text" id="moorchehNamespace" placeholder="tabchat_user_1234" />
+
+  <button id="saveMoorcheh">Save Moorcheh Config</button>
+  <div id="moorchehStatus"></div>
 
   <hr />
 

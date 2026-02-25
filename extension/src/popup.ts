@@ -26,6 +26,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const saveApiKeyBtn = document.getElementById("saveApiKey") as HTMLButtonElement;
   const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLDivElement;
 
+  const moorchehKeyInput = document.getElementById("moorchehKey") as HTMLInputElement;
+  const moorchehNamespaceInput = document.getElementById("moorchehNamespace") as HTMLInputElement;
+  const saveMoorchehBtn = document.getElementById("saveMoorcheh") as HTMLButtonElement;
+  const moorchehStatus = document.getElementById("moorchehStatus") as HTMLDivElement;
+
   console.log("Popup loaded ✅");
 
   // Change form based on selected database type
@@ -36,7 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Load saved settings
-  chrome.storage.local.get(["dbConfig", "openaiKey"], (data) => {
+  chrome.storage.local.get(["dbConfig", "openaiKey", "moorchehKey", "moorchehNamespace"], (data) => {
     const conf = (data.dbConfig as DBConfig) || { type: "sqlite" };
     dbSelect.value = conf.type;
 
@@ -53,9 +58,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (data.openaiKey) openaiKeyInput.value = "********";
+
+    if (data.moorchehKey) moorchehKeyInput.value = "********";
+    moorchehNamespaceInput.value = (data?.moorchehNamespace ?? "") as string;
   });
 
-  // Save API Key
+  // Save API Key (OpenAI)
   saveApiKeyBtn.addEventListener("click", () => {
     const key = openaiKeyInput.value.trim();
     if (!key.startsWith("sk-")) {
@@ -63,7 +71,22 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     chrome.storage.local.set({ openaiKey: key }, () => {
-      apiKeyStatus.textContent = "✅ API key saved locally.";
+      apiKeyStatus.textContent = "✅ OpenAI API key saved locally.";
+    });
+  });
+
+  // Save Moorcheh Config
+  saveMoorchehBtn.addEventListener("click", () => {
+    const moorKey = moorchehKeyInput.value.trim();
+    const ns = moorchehNamespaceInput.value.trim();
+
+    if (!ns) {
+      moorchehStatus.textContent = "❌ Namespace is required.";
+      return;
+    }
+
+    chrome.storage.local.set({ moorchehKey: moorKey, moorchehNamespace: ns }, () => {
+      moorchehStatus.textContent = "✅ Moorcheh configuration saved.";
     });
   });
 
@@ -103,8 +126,11 @@ document.addEventListener("DOMContentLoaded", () => {
   collect.addEventListener("click", async () => {
     status.textContent = "Collecting tabs...";
 
-    chrome.storage.local.get(["openaiKey"], async (data) => {
+    chrome.storage.local.get(["openaiKey", "moorchehKey", "moorchehNamespace"], async (data) => {
       const apiKey = data.openaiKey;
+      const moorchehKey = data.moorchehKey;
+      const moorchehNamespace = data.moorchehNamespace;
+
       if (!apiKey) {
         status.textContent = "❌ Please enter your OpenAI API key first.";
         return;
@@ -119,26 +145,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const r = await fetch(`${SERVER}/ingest`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ docs, apiKey }),
+          body: JSON.stringify({ docs, apiKey, moorchehKey, moorchehNamespace }),
         });
         const j = await r.json();
 
-        // 🔹 Handle different responses:
         if (!j.ok) {
           status.textContent = j.error || "❌ Error during processing.";
+        } else {
+          status.textContent = j.message || `✅ ${j.count} tabs saved.`;
         }
-        else if (j.message) {
-          // Server returned a custom message (e.g., "All tabs already saved")
-          status.textContent = j.message;
-        }
-        else if (typeof j.count === "number") {
-          // Default: show number of tabs saved
-          status.textContent = `✅ ${j.count} tabs saved.`;
-        }
-        else {
-          status.textContent = "✅ Operation completed successfully.";
-        }
-
       } catch (e) {
         console.error("❌ Fetch error:", e);
         status.textContent = "❌ Error connecting to server.";
@@ -157,8 +172,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     chrome.tabs.sendMessage(tab.id, { action: "openSearchOverlay" });
-
-    // Close popup after injection
     window.close();
   });
 
