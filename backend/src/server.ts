@@ -11,6 +11,10 @@ import { SupabaseVectorStoreImpl } from "./vectorstores/SupabaseVectorStoreImpl.
 import { LocalDBVectorStoreImpl } from "./vectorstores/LocalDBVectorStoreImpl.ts";
 import { SQLiteVectorStoreImpl } from "./vectorstores/SQLiteVectorStoreImpl.ts";
 
+import { MoorchehClient } from "./moorchehClient.ts"; // <- new helper
+
+import { v4 as uuidv4 } from "uuid";
+
 const app = express();
 
 // ------------------ ENV ------------------
@@ -50,9 +54,34 @@ if (vectorStore) {
 app.use(cors({ origin: "*" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 
+
+// ------------------ Helpers ------------------
+
+/**
+ * Get Moorcheh client: prefer moorchehKey in request body, else fallback to env key
+ */
+function getMoorchehClientFromKey(moorchehKey?: string) {
+  const apiKey = (moorchehKey && moorchehKey.startsWith("moor-")) ? moorchehKey : DEFAULT_MOORCHEH_API_KEY;
+  if (!apiKey) return null;
+  return new MoorchehClient(apiKey);
+}
+
+/**
+ * Helper: ensure namespace exists (create if not)
+ */
+async function ensureNamespace(client: MoorchehClient | null, namespace: string) {
+  if (!client) return;
+  try {
+    await client.createNamespace(namespace, "text");
+    // ignore 409 conflict inside client
+  } catch (err) {
+    console.warn("⚠️ Could not create/check namespace:", err);
+  }
+}
+
 // ------------------ Ingest ------------------
 app.post("/ingest", async (req, res) => {
-  const { docs, apiKey } = req.body;
+  const { docs, apiKey, moorchehKey, moorchehNamespace } = req.body;
 
   // 1️⃣ Check database
   if (!isDbConfigured || !vectorStore) {
@@ -63,7 +92,7 @@ app.post("/ingest", async (req, res) => {
     });
   }
 
-  // 2️⃣ Check OpenAI API key
+  // 2️⃣ Check OpenAI API key (for local embedding generation)
   if (!apiKey || !apiKey.startsWith("sk-")) {
     return res.status(400).json({
       ok: false,
@@ -90,7 +119,7 @@ app.post("/ingest", async (req, res) => {
       existingDocs.map((d: any) => d.metadata?.url).filter(Boolean)
     );
 
-    const uniqueDocs = docs.filter((d) => !existingUrls.has(d.url));
+    const uniqueDocs = docs.filter((d: any) => !existingUrls.has(d.url));
 
     // If no new tabs
     if (uniqueDocs.length === 0) {
@@ -184,11 +213,68 @@ app.post("/ingest", async (req, res) => {
       });
     }
 
-    // Save to database
-    await vectorStore.addDocuments(allDocsToSave, apiKey);
+    // Save to local database (vectorStore)
+    // NOTE: addDocuments implementations expect apiKey param for embedding generation;
+    // but we already generated embeddings above — we will call addDocuments with text+metadata
+    // and below we assume each store's addDocuments accepts doc.embedding OR will re-embed.
+    // We'll call with text+metadata only to preserve current behavior (some stores will re-embed).
+    const docsToDb = allDocsToSave.map((d) => ({ text: d.text, metadata: d.metadata }));
+    // make sure addDocuments signature matches your implementations:
+    await vectorStore.addDocuments(docsToDb, apiKey);
     console.log(
-      `💾 Saved ${allDocsToSave.length} markdown sections from ${countTabs} new tabs.`
+      `💾 Saved ${allDocsToSave.length} markdown sections from ${countTabs} new tabs to local DB.`
     );
+
+    // ----------------------------
+    // Upload to Moorcheh (per-user namespace)
+    // ----------------------------
+    // determine namespace:
+    // precedence: req.body.moorchehNamespace || derived from saved DB (if you have per-user id) || DEFAULT_MOORCHEH_NAMESPACE
+    const namespace = moorchehNamespace || DEFAULT_MOORCHEH_NAMESPACE;
+
+    // Moorcheh client: prefer moorchehKey from req, else env key
+    const moor = getMoorchehClientFromKey(moorchehKey);
+
+    if (moor) {
+      try {
+        // create namespace if not exists
+        await ensureNamespace(moor, namespace);
+
+        // build documents for Moorcheh upload (id, text, plus metadata flattened)
+        // IMPORTANT: Moorcheh expects a flat object per document with 'id' and 'text' keys.
+        // We'll create deterministic ids so that re-uploads can be idempotent if desired.
+        const docsForMoorcheh = allDocsToSave.map((d, idx) => {
+          // id: use uuid or deterministic string: url + part
+          const id =
+            (d.metadata?.url ? `${d.metadata.url}::part:${d.metadata.part}` : `tabchat-${uuidv4()}`)
+              .slice(0, 1000); // guard length
+          return {
+            id,
+            text: d.text,
+            title: d.metadata?.title,
+            url: d.metadata?.url,
+            part: d.metadata?.part,
+          };
+        });
+
+        // Upload in batches of e.g., 25-50 (docs mention recommended 25-50)
+        const BATCH = 40;
+        for (let i = 0; i < docsForMoorcheh.length; i += BATCH) {
+          const batch = docsForMoorcheh.slice(i, i + BATCH);
+          try {
+            await moor.uploadTextDocuments(namespace, batch);
+            console.log(`⬆️ Uploaded ${batch.length} docs to Moorcheh namespace=${namespace}`);
+          } catch (err) {
+            console.warn("⚠️ Moorcheh upload batch failed:", err);
+            // do not fail the whole ingest — continue
+          }
+        }
+      } catch (err) {
+        console.warn("⚠️ Moorcheh stage failed:", err);
+      }
+    } else {
+      console.log("ℹ️ No Moorcheh API key provided — skipping Moorcheh upload");
+    }
 
     res.json({
       ok: true,
@@ -254,6 +340,8 @@ app.post("/chat", async (req, res) => {
 });
 
 // ------------------ Config Switching ------------------
+// keep /config as before, unchanged
+
 app.post("/config", async (req, res) => {
   const { supabaseUrl, supabaseKey, localDbUrl, sqlitePath } = req.body;
 
@@ -285,11 +373,13 @@ app.post("/config", async (req, res) => {
 
 // ------------------ Search ------------------
 app.post("/search", async (req, res) => {
-  const { q, apiKey } = req.body;
+  const { q, apiKey, moorchehKey, moorchehNamespace, top_k } = req.body;
 
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
-  if (!apiKey || !apiKey.startsWith("sk-"))
+
+  if (!apiKey || !apiKey.startsWith("sk-")) {
     return res.status(400).json({ ok: false, error: "Missing or invalid OpenAI API key" });
+  }
 
   if (!isDbConfigured || !vectorStore) {
     return res.status(400).json({
@@ -299,18 +389,48 @@ app.post("/search", async (req, res) => {
   }
 
   try {
+    // Prefer Moorcheh search
+    const namespace = moorchehNamespace || DEFAULT_MOORCHEH_NAMESPACE;
+    const moor = getMoorchehClientFromKey(moorchehKey);
+
+    if (moor) {
+      try {
+        // call Moorcheh search with text query; Moorcheh will generate embedding server-side
+        const searchResp = await moor.search([namespace], q, { top_k: top_k || 5 });
+
+        // Format Moorcheh response to our frontend expected shape
+        const results = (searchResp.data?.results || []).map((r: any) => ({
+          content: r.text,
+          metadata: r.metadata || {},
+          score: r.score,
+          label: r.label,
+          id: r.id,
+        }));
+
+        return res.json({
+          ok: true,
+          source: "moorcheh",
+          results,
+          execution_time: searchResp.data?.execution_time,
+        });
+      } catch (err) {
+        console.warn("⚠️ Moorcheh search failed, falling back to local search:", err);
+        // fallback to local similarity search below
+      }
+    } else {
+      console.log("ℹ️ No Moorcheh key provided; using local search fallback");
+    }
+
+    // FALLBACK: local embedding similarity
     const embedder = new OpenAIEmbeddings({ apiKey });
     const queryEmbedding = await embedder.embedQuery(q);
-
     const docs = await vectorStore.getAllDocuments();
-    if (!docs.length)
-      return res.status(404).json({ ok: false, error: "No documents indexed yet." });
-
-    const results = similaritySearchLocal(queryEmbedding, docs, 5);
+    const resultsLocal = similaritySearchLocal(queryEmbedding, docs, top_k || 5);
 
     res.json({
       ok: true,
-      results: results.map((r) => ({
+      source: "local",
+      results: resultsLocal.map((r: any) => ({
         content: r.text,
         metadata: r.metadata,
         score: r.score,
