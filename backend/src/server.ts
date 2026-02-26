@@ -10,10 +10,9 @@ import type { IVectorStore } from "./IVectorStore.ts";
 import { SupabaseVectorStoreImpl } from "./vectorstores/SupabaseVectorStoreImpl.ts";
 import { LocalDBVectorStoreImpl } from "./vectorstores/LocalDBVectorStoreImpl.ts";
 import { SQLiteVectorStoreImpl } from "./vectorstores/SQLiteVectorStoreImpl.ts";
-
-import { MoorchehClient } from "./moorchehClient.ts"; // <- new helper
-
+import { MoorchehClient } from "./moorchehClient.ts";
 import { v4 as uuidv4 } from "uuid";
+import { URL } from "url";
 
 const app = express();
 
@@ -23,6 +22,8 @@ const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY!;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const LOCAL_DB_URL = process.env.LOCAL_DB_URL;
+const DEFAULT_MOORCHEH_API_KEY = process.env.DEFAULT_MOORCHEH_API_KEY || "";
+const DEFAULT_MOORCHEH_NAMESPACE = process.env.DEFAULT_MOORCHEH_NAMESPACE || "default-namespace";
 
 // ------------------ Global State ------------------
 let vectorStore: IVectorStore | null = null;
@@ -46,34 +47,26 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   isDbConfigured = false;
 }
 
-if (vectorStore) {
-  await vectorStore.init();
-}
+if (vectorStore) await vectorStore.init();
 
 // ------------------ Middleware ------------------
 app.use(cors({ origin: "*" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 
-
 // ------------------ Helpers ------------------
-
-/**
- * Get Moorcheh client: prefer moorchehKey in request body, else fallback to env key
- */
 function getMoorchehClientFromKey(moorchehKey?: string) {
-  const apiKey = (moorchehKey && moorchehKey.startsWith("moor-")) ? moorchehKey : DEFAULT_MOORCHEH_API_KEY;
+  const apiKey =
+    moorchehKey && moorchehKey.startsWith("moor-")
+      ? moorchehKey
+      : DEFAULT_MOORCHEH_API_KEY;
   if (!apiKey) return null;
   return new MoorchehClient(apiKey);
 }
 
-/**
- * Helper: ensure namespace exists (create if not)
- */
 async function ensureNamespace(client: MoorchehClient | null, namespace: string) {
   if (!client) return;
   try {
     await client.createNamespace(namespace, "text");
-    // ignore 409 conflict inside client
   } catch (err) {
     console.warn("⚠️ Could not create/check namespace:", err);
   }
@@ -81,286 +74,200 @@ async function ensureNamespace(client: MoorchehClient | null, namespace: string)
 
 // ------------------ Ingest ------------------
 app.post("/ingest", async (req, res) => {
-  const { docs, apiKey, moorchehKey, moorchehNamespace } = req.body;
+  const { docs, apiKey, moorchehKey } = req.body;
 
-  // 1️⃣ Check database
   if (!isDbConfigured || !vectorStore) {
-    return res.status(400).json({
-      ok: false,
-      count: 0,
-      error: "❌ No database configured. Please select one (Supabase or Local Postgres) first.",
-    });
+    return res.status(400).json({ ok: false, count: 0, error: "❌ No database configured." });
   }
-
-  // 2️⃣ Check OpenAI API key (for local embedding generation)
   if (!apiKey || !apiKey.startsWith("sk-")) {
-    return res.status(400).json({
-      ok: false,
-      count: 0,
-      error: "❌ Missing or invalid OpenAI API key",
-    });
+    return res.status(400).json({ ok: false, count: 0, error: "❌ Missing or invalid OpenAI API key" });
   }
-
-  // 3️⃣ Validate input
   if (!Array.isArray(docs) || !docs.length) {
-    return res.status(400).json({
-      ok: false,
-      count: 0,
-      error: "❌ Invalid or empty docs array.",
-    });
+    return res.status(400).json({ ok: false, count: 0, error: "❌ Invalid or empty docs array." });
   }
 
   const embedder = new OpenAIEmbeddings({ apiKey });
 
   try {
-    // Remove duplicates by URL
     const existingDocs = await vectorStore.getAllDocuments();
-    const existingUrls = new Set(
-      existingDocs.map((d: any) => d.metadata?.url).filter(Boolean)
-    );
+    const existingUrls = new Set(existingDocs.map((d: any) => d.metadata?.url).filter(Boolean));
+    const uniqueDocs = docs.filter((d) => !existingUrls.has(d.url));
 
-    const uniqueDocs = docs.filter((d: any) => !existingUrls.has(d.url));
-
-    // If no new tabs
-    if (uniqueDocs.length === 0) {
-      console.log("⚠️ All tabs already exist, skipping ingest.");
-      return res.json({
-        ok: true,
-        count: 0,
-        countTabs: 0,
-        countChunks: 0,
-        message: "⚠️ All tabs have already been saved, no action needed.",
-      });
+    if (!uniqueDocs.length) {
+      return res.json({ ok: true, count: 0, countTabs: 0, countChunks: 0, message: "⚠️ All tabs already exist." });
     }
 
     const allDocsToSave: { text: string; metadata: any; embedding?: number[] }[] = [];
     let countTabs = 0;
 
-    // Process new tabs
     for (const doc of uniqueDocs) {
       try {
-        const payload = {
-          url: doc.url,
-          formats: ["markdown"],
-          excludeTags: ["nav", "footer", "header", "script", "style"],
-          blockAds: true,
-          waitFor: 2000,
-        };
-
+        const payload = { url: doc.url, formats: ["markdown"], excludeTags: ["nav","footer","header","script","style"], blockAds: true, waitFor: 2000 };
         const response = await fetch(FIRECRAWL_API, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: `Bearer ${FIRECRAWL_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-
         const data = await response.json();
         const markdown = (data?.data?.markdown || "").trim();
+        if (!markdown) continue;
 
-        if (!markdown) {
-          console.log("🚫 No markdown returned from Firecrawl:", doc.url);
-          continue;
-        }
-
-        // Split content into paragraphs without breaking them
         const chunks: string[] = [];
         const maxLen = 5000;
         let buffer = "";
         const paragraphs = markdown.split(/\n{2,}/);
-
         for (const para of paragraphs) {
           const trimmed = para.trim();
           if (!trimmed) continue;
-
           if ((buffer + "\n\n" + trimmed).length > maxLen) {
             if (buffer.trim().length > 50) chunks.push(buffer.trim());
             buffer = trimmed;
-          } else {
-            buffer += (buffer ? "\n\n" : "") + trimmed;
-          }
+          } else buffer += (buffer ? "\n\n" : "") + trimmed;
         }
-
         if (buffer.trim().length > 50) chunks.push(buffer.trim());
         if (!chunks.length) continue;
 
-        countTabs++; // ✅ New tab saved
+        countTabs++;
+        console.log(`📄 ${doc.url}: Split into ${chunks.length} chunks`);
 
-        console.log(`📄 ${doc.url}: Split into ${chunks.length} structured chunks`);
-
-        // Generate embeddings for each chunk
         const embeddings = await embedder.embedDocuments(chunks);
-
         chunks.forEach((chunk, i) => {
           allDocsToSave.push({
             text: chunk,
-            metadata: { title: doc.title, url: doc.url, part: i + 1 },
+            metadata: { title: doc.title, url: doc.url, part: i+1, moorNamespace: `tabchat-${new URL(doc.url).hostname.replace(/\./g, "-")}` },
             embedding: embeddings[i],
           });
         });
+
       } catch (err) {
         console.error(`❌ Firecrawl error for ${doc.url}:`, err);
       }
     }
 
-    // No valid content found
     if (!allDocsToSave.length) {
-      return res.status(400).json({
-        ok: false,
-        count: 0,
-        message: "❌ No valid content retrieved from pages.",
-      });
+      return res.status(400).json({ ok: false, count: 0, message: "❌ No valid content retrieved." });
     }
 
-    // Save to local database (vectorStore)
-    // NOTE: addDocuments implementations expect apiKey param for embedding generation;
-    // but we already generated embeddings above — we will call addDocuments with text+metadata
-    // and below we assume each store's addDocuments accepts doc.embedding OR will re-embed.
-    // We'll call with text+metadata only to preserve current behavior (some stores will re-embed).
-    const docsToDb = allDocsToSave.map((d) => ({ text: d.text, metadata: d.metadata }));
-    // make sure addDocuments signature matches your implementations:
-    await vectorStore.addDocuments(docsToDb, apiKey);
-    console.log(
-      `💾 Saved ${allDocsToSave.length} markdown sections from ${countTabs} new tabs to local DB.`
-    );
+    await vectorStore.addDocuments(allDocsToSave, apiKey);
+    console.log(`💾 Saved ${allDocsToSave.length} sections from ${countTabs} new tabs.`);
 
-    // ----------------------------
-    // Upload to Moorcheh (per-user namespace)
-    // ----------------------------
-    // determine namespace:
-    // precedence: req.body.moorchehNamespace || derived from saved DB (if you have per-user id) || DEFAULT_MOORCHEH_NAMESPACE
-    const namespace = moorchehNamespace || DEFAULT_MOORCHEH_NAMESPACE;
-
-    // Moorcheh client: prefer moorchehKey from req, else env key
     const moor = getMoorchehClientFromKey(moorchehKey);
-
     if (moor) {
       try {
-        // create namespace if not exists
-        await ensureNamespace(moor, namespace);
-
-        // build documents for Moorcheh upload (id, text, plus metadata flattened)
-        // IMPORTANT: Moorcheh expects a flat object per document with 'id' and 'text' keys.
-        // We'll create deterministic ids so that re-uploads can be idempotent if desired.
-        const docsForMoorcheh = allDocsToSave.map((d, idx) => {
-          // id: use uuid or deterministic string: url + part
-          const id =
-            (d.metadata?.url ? `${d.metadata.url}::part:${d.metadata.part}` : `tabchat-${uuidv4()}`)
-              .slice(0, 1000); // guard length
-          return {
-            id,
+        const grouped: Record<string, any[]> = {};
+        for (const d of allDocsToSave) {
+          const domain = new URL(d.metadata.url).hostname.replace(/\./g, "-");
+          const namespace = `tabchat-${domain}`;
+          if (!grouped[namespace]) grouped[namespace] = [];
+          grouped[namespace].push(d);
+        }
+        for (const [namespace, docs] of Object.entries(grouped)) {
+          await ensureNamespace(moor, namespace);
+          const docsForMoorcheh = docs.map((d) => ({
+            id: `${d.metadata.url}::${d.metadata.part}`,
             text: d.text,
-            title: d.metadata?.title,
-            url: d.metadata?.url,
-            part: d.metadata?.part,
-          };
-        });
-
-        // Upload in batches of e.g., 25-50 (docs mention recommended 25-50)
-        const BATCH = 40;
-        for (let i = 0; i < docsForMoorcheh.length; i += BATCH) {
-          const batch = docsForMoorcheh.slice(i, i + BATCH);
-          try {
+            metadata: { url: d.metadata.url, title: d.metadata.title, part: d.metadata.part }
+          }));
+          const BATCH = 40;
+          for (let i = 0; i < docsForMoorcheh.length; i += BATCH) {
+            const batch = docsForMoorcheh.slice(i, i + BATCH);
             await moor.uploadTextDocuments(namespace, batch);
-            console.log(`⬆️ Uploaded ${batch.length} docs to Moorcheh namespace=${namespace}`);
-          } catch (err) {
-            console.warn("⚠️ Moorcheh upload batch failed:", err);
-            // do not fail the whole ingest — continue
+            console.log(`⬆️ Uploaded ${batch.length} docs to Moorcheh (${namespace})`);
+            // اضافه کردن لاگ ID ها و عنوان ها
+            batch.forEach(d => {
+            console.log(`   • ID: ${d.id} | Title: ${d.metadata.title}`);
+            });
           }
         }
-      } catch (err) {
-        console.warn("⚠️ Moorcheh stage failed:", err);
-      }
-    } else {
-      console.log("ℹ️ No Moorcheh API key provided — skipping Moorcheh upload");
+      } catch (err) { console.warn("⚠️ Moorcheh upload failed:", err); }
     }
 
-    res.json({
-      ok: true,
-      count: countTabs,
-      countTabs,
-      countChunks: allDocsToSave.length,
-      message: `✅ Saved ${allDocsToSave.length} sections from ${countTabs} new tabs.`,
-    });
+    res.json({ ok: true, count: countTabs, countTabs, countChunks: allDocsToSave.length, message: `✅ Saved ${allDocsToSave.length} sections.` });
   } catch (err: any) {
     console.error("❌ Ingest error:", err);
-    res.status(500).json({
-      ok: false,
-      count: 0,
-      error: err.message || "Server error while ingesting.",
-    });
+    res.status(500).json({ ok: false, count: 0, error: err.message || "Server error." });
   }
 });
 
 // ------------------ Chat ------------------
 app.post("/chat", async (req, res) => {
-  const { question, apiKey } = req.body;
+  const { question, apiKey, moorchehKey, url } = req.body;
 
-  if (!question?.trim()) return res.status(400).json({ answer: "Question required." });
-  if (!apiKey || !apiKey.startsWith("sk-")) {
-    return res.status(400).json({ answer: "Missing or invalid OpenAI API key" });
-  }
-
-  if (!isDbConfigured || !vectorStore) {
-    return res.status(400).json({
-      ok: false,
-      error: "❌ No database configured. Please configure one first.",
-    });
-  }
+  if (!question?.trim()) return res.status(400).json({ ok: false, answer: "❌ Question required." });
+  if (!apiKey?.startsWith("sk-")) return res.status(400).json({ ok: false, answer: "❌ Invalid OpenAI key." });
+  if (!url) return res.status(400).json({ ok: false, answer: "❌ Missing URL." });
 
   try {
-    const embedder = new OpenAIEmbeddings({ apiKey });
     const chatLLM = new ChatOpenAI({ apiKey, temperature: 0 });
+    let contextDocs: any[] = [];
+    let source = "local";
 
-    const queryEmbedding = await embedder.embedQuery(question);
-    const docs = await vectorStore.getAllDocuments();
-    const results = similaritySearchLocal(queryEmbedding, docs, 5);
+    const moor = getMoorchehClientFromKey(moorchehKey);
+    let namespace = DEFAULT_MOORCHEH_NAMESPACE;
+    try { namespace = `tabchat-${new URL(url).hostname.replace(/\./g, "-")}`; } catch {}
 
-    const context = results.map((r) => r.text).join("\n\n");
+    if (moor) {
+      try {
+        const namespaces = [namespace];
+        const resp = await moor.search(namespaces, question, { top_k: 20 });
+        const moorResults = (resp.data?.results || [])
+          .filter((r: any) => r.metadata?.url?.startsWith(url.split("#")[0]))
+          .slice(0,5)
+          .map((r: any) => ({ content: r.text, metadata: r.metadata, score: r.score }));
+
+        if (moorResults.length) {
+          source = "moorcheh";
+          contextDocs = moorResults;
+        }
+      } catch (err) { console.warn("⚠️ Moorcheh search failed:", err); }
+    }
+
+    if (!contextDocs.length) {
+      if (!vectorStore) return res.status(500).json({ ok: false, answer: "No local DB configured." });
+      const embedder = new OpenAIEmbeddings({ apiKey });
+      const qEmbed = await embedder.embedQuery(question);
+      const docs = (await vectorStore.getAllDocuments()).filter((d: any) => d.metadata?.url === url);
+      const localResults = similaritySearchLocal(qEmbed, docs, 5);
+      contextDocs = localResults.map((r) => ({ content: r.text, metadata: r.metadata }));
+    }
+
+    const contextText = contextDocs.map(d => d.content).join("\n\n---\n\n");
     const fullPrompt = `
-      Answer based on the following context:
-      ${context}
+Use ONLY the following CONTEXT to answer the question.
+If the answer is not in context, reply:
+"I don't have that information in the provided context."
 
-      Question: ${question}
-    `;
+CONTEXT:
+"""
+${contextText || "No relevant context found."}
+"""
+
+QUESTION:
+${question}`;
 
     const response = await chatLLM.generate([
       [
-        { role: "system", content: "You are a multilingual assistant." },
+        { role: "system", content: "Answer strictly from the context only." },
         { role: "user", content: fullPrompt },
       ],
     ]);
 
-    res.json({ answer: response.generations[0][0].text.trim() });
+    const answer = response.generations?.[0]?.[0]?.text?.trim() || "I don't have that information.";
+    res.json({ ok: true, source, answer, results: contextDocs });
   } catch (err: any) {
     console.error("❌ Chat error:", err);
-    res.status(500).json({ answer: "Server error." });
+    res.status(500).json({ ok: false, answer: "Server error.", error: err.message });
   }
 });
 
-// ------------------ Config Switching ------------------
-// keep /config as before, unchanged
-
+// ------------------ Config ------------------
 app.post("/config", async (req, res) => {
   const { supabaseUrl, supabaseKey, localDbUrl, sqlitePath } = req.body;
-
   try {
-    if (supabaseUrl && supabaseKey) {
-      console.log("🟢 Switching to Supabase...");
-      vectorStore = new SupabaseVectorStoreImpl(supabaseUrl, supabaseKey);
-      currentDBMode = "supabase";
-    } else if (localDbUrl) {
-      console.log("🟠 Switching to Local Postgres...");
-      vectorStore = new LocalDBVectorStoreImpl(localDbUrl);
-      currentDBMode = "local";
-    } else if (sqlitePath) {
-      console.log("🟣 Switching to SQLite...");
-      vectorStore = new SQLiteVectorStoreImpl(sqlitePath);
-      currentDBMode = "sqlite";
-    } else {
-      throw new Error("No valid configuration provided");
-    }
+    if (supabaseUrl && supabaseKey) { vectorStore = new SupabaseVectorStoreImpl(supabaseUrl, supabaseKey); currentDBMode = "supabase"; }
+    else if (localDbUrl) { vectorStore = new LocalDBVectorStoreImpl(localDbUrl); currentDBMode = "local"; }
+    else if (sqlitePath) { vectorStore = new SQLiteVectorStoreImpl(sqlitePath); currentDBMode = "sqlite"; }
+    else throw new Error("Invalid config");
 
     await vectorStore.init();
     isDbConfigured = true;
@@ -373,69 +280,81 @@ app.post("/config", async (req, res) => {
 
 // ------------------ Search ------------------
 app.post("/search", async (req, res) => {
-  const { q, apiKey, moorchehKey, moorchehNamespace, top_k } = req.body;
+  const { q, apiKey, moorchehKey } = req.body;
 
-  if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
-
-  if (!apiKey || !apiKey.startsWith("sk-")) {
-    return res.status(400).json({ ok: false, error: "Missing or invalid OpenAI API key" });
-  }
-
-  if (!isDbConfigured || !vectorStore) {
-    return res.status(400).json({
-      ok: false,
-      error: "❌ No database configured. Please select one in settings first.",
-    });
-  }
+  if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required." });
+  if (!apiKey?.startsWith("sk-")) return res.status(400).json({ ok: false, error: "Invalid OpenAI key." });
 
   try {
-    // Prefer Moorcheh search
-    const namespace = moorchehNamespace || DEFAULT_MOORCHEH_NAMESPACE;
     const moor = getMoorchehClientFromKey(moorchehKey);
 
+    // ======= Try Moorcheh first =======
     if (moor) {
       try {
-        // call Moorcheh search with text query; Moorcheh will generate embedding server-side
-        const searchResp = await moor.search([namespace], q, { top_k: top_k || 5 });
+        const namespacesRaw = await moor.listNamespaces();
+        const allNamespaces: string[] = Array.isArray(namespacesRaw)
+          ? namespacesRaw.map(ns => typeof ns === "string" ? ns : ns.namespace_name).filter(Boolean)
+          : [];
 
-        // Format Moorcheh response to our frontend expected shape
-        const results = (searchResp.data?.results || []).map((r: any) => ({
-          content: r.text,
-          metadata: r.metadata || {},
-          score: r.score,
-          label: r.label,
-          id: r.id,
-        }));
+        if (allNamespaces.length > 0) {
+          const resp = await moor.search(allNamespaces, q, { top_k: 20 });
+          const moorResults = (resp.data?.results || [])
+  .map((r: any) => {
+    // بررسی لایه اضافی metadata
+    const meta = r.metadata?.metadata || r.metadata || {};
+    const urlSafe = meta.url || "";
+    let titleSafe = meta.title || "";
+    if (!titleSafe && urlSafe) {
+      try { titleSafe = new URL(urlSafe).hostname; } catch {}
+    }
+    const header = `${titleSafe}\n${urlSafe}`;
+    return {
+      content: `${header}\n\n${r.text}`,
+      metadata: {
+        url: urlSafe,
+        title: titleSafe,
+        part: meta.part,
+      },
+      score: r.score
+    };
+  })
+  .slice(0, 10);
 
-        return res.json({
-          ok: true,
-          source: "moorcheh",
-          results,
-          execution_time: searchResp.data?.execution_time,
-        });
-      } catch (err) {
-        console.warn("⚠️ Moorcheh search failed, falling back to local search:", err);
-        // fallback to local similarity search below
+          if (moorResults.length > 0) {
+            return res.json({ ok: true, source: "moorcheh", results: moorResults });
+          }
+        }
+      } catch (err: any) {
+        console.warn("⚠️ Moorcheh search failed, falling back to local:", err.message);
       }
-    } else {
-      console.log("ℹ️ No Moorcheh key provided; using local search fallback");
     }
 
-    // FALLBACK: local embedding similarity
-    const embedder = new OpenAIEmbeddings({ apiKey });
-    const queryEmbedding = await embedder.embedQuery(q);
-    const docs = await vectorStore.getAllDocuments();
-    const resultsLocal = similaritySearchLocal(queryEmbedding, docs, top_k || 5);
+    // ======= Fallback Local =======
+    if (!vectorStore) return res.status(500).json({ ok: false, error: "No database configured for local search." });
 
-    res.json({
-      ok: true,
-      source: "local",
-      results: resultsLocal.map((r: any) => ({
-        content: r.text,
-        metadata: r.metadata,
-        score: r.score,
-      })),
+    const embedder = new OpenAIEmbeddings({ apiKey });
+    const qEmbed = await embedder.embedQuery(q);
+    const allDocs = await vectorStore.getAllDocuments();
+    const localResults = similaritySearchLocal(qEmbed, allDocs, 10);
+
+    const formattedResults = localResults.map((r) => {
+      const urlSafe = r.metadata?.url || "";
+      let titleSafe = r.metadata?.title || "";
+      if (!titleSafe && urlSafe) {
+        try { titleSafe = new URL(urlSafe).hostname; } catch {}
+      }
+      const header = `${titleSafe}\n${urlSafe}`;
+      return {
+        content: `${header}\n\n${r.text}`,
+        metadata: {
+          url: urlSafe,
+          title: titleSafe,
+          part: r.metadata?.part,
+        },
+      };
     });
+
+    res.json({ ok: true, source: "local", results: formattedResults });
   } catch (err: any) {
     console.error("❌ Search error:", err);
     res.status(500).json({ ok: false, error: err.message || "Server error" });
