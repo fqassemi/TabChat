@@ -110,4 +110,14 @@ export class MoorchehClient {
     const text = await res.text();
     throw new Error(`Moorcheh search failed: ${res.status} ${text}`);
   }
+    async listNamespaces() {
+        const res = await fetch(`https://api.moorcheh.ai/v1/namespaces`, {
+          method: "GET",
+          headers: {
+            "x-api-key": this.apiKey,
+          },
+        });
+        const data = await res.json();
+        return data.namespaces || [];
+      }
 }
