@@ -75,20 +75,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Save Moorcheh Config
-  saveMoorchehBtn.addEventListener("click", () => {
-    const moorKey = moorchehKeyInput.value.trim();
-    const ns = moorchehNamespaceInput.value.trim();
 
-    if (!ns) {
-      moorchehStatus.textContent = "❌ Namespace is required.";
-      return;
-    }
-
-    chrome.storage.local.set({ moorchehKey: moorKey, moorchehNamespace: ns }, () => {
-      moorchehStatus.textContent = "✅ Moorcheh configuration saved.";
-    });
-  });
 
   // Save database configuration
   saveConfig.addEventListener("click", async () => {
