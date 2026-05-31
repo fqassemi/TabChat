@@ -1,6 +1,25 @@
 // popup.ts
 const SERVER = "http://localhost:8000";
 
+function getOrCreateUserId(): Promise<string> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["userId"], (data) => {
+      const existingUserId = data.userId as string | undefined;
+
+      if (existingUserId) {
+        resolve(existingUserId);
+        return;
+      }
+
+      const userId = crypto.randomUUID();
+
+      chrome.storage.local.set({ userId }, () => {
+        resolve(userId);
+      });
+    });
+  });
+}
+
 interface DBConfig {
   type: "supabase" | "local" | "sqlite";
   supabaseUrl?: string;
@@ -100,51 +119,61 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Collect tabs
-  collect.addEventListener("click", async () => {
-    status.textContent = "Collecting tabs...";
+    collect.addEventListener("click", async () => {
+      status.textContent = "Collecting tabs...";
 
-    chrome.storage.local.get(["openaiKey"], async (data) => {
-      const apiKey = data.openaiKey;
-      if (!apiKey) {
-        status.textContent = "❌ Please enter your OpenAI API key first.";
-        return;
-      }
+      chrome.storage.local.get(["openaiKey"], async (data) => {
+        const apiKey = data.openaiKey;
 
-      const tabs = await new Promise<chrome.tabs.Tab[]>((res) => chrome.tabs.query({}, res));
-      const docs = tabs
-        .filter((t) => t.url?.startsWith("http"))
-        .map((t) => ({ title: t.title || "", url: t.url! }));
-
-      try {
-        const r = await fetch(`${SERVER}/ingest`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ docs, apiKey }),
-        });
-        const j = await r.json();
-
-        // 🔹 Handle different responses:
-        if (!j.ok) {
-          status.textContent = j.error || "❌ Error during processing.";
-        }
-        else if (j.message) {
-          // Server returned a custom message (e.g., "All tabs already saved")
-          status.textContent = j.message;
-        }
-        else if (typeof j.count === "number") {
-          // Default: show number of tabs saved
-          status.textContent = `✅ ${j.count} tabs saved.`;
-        }
-        else {
-          status.textContent = "✅ Operation completed successfully.";
+        if (!apiKey) {
+          status.textContent = "❌ Please enter your OpenAI API key first.";
+          return;
         }
 
-      } catch (e) {
-        console.error("❌ Fetch error:", e);
-        status.textContent = "❌ Error connecting to server.";
-      }
+        const tabs = await new Promise<chrome.tabs.Tab[]>((res) =>
+          chrome.tabs.query({}, res)
+        );
+
+        const docs = tabs
+          .filter((t) => t.url?.startsWith("http"))
+          .map((t) => ({
+            title: t.title || "",
+            url: t.url!,
+          }));
+
+        try {
+          const userId = await getOrCreateUserId();
+
+          const r = await fetch(`${SERVER}/ingest`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              docs,
+              apiKey,
+              userId,
+            }),
+          });
+
+          const j = await r.json();
+
+          if (!j.ok) {
+            status.textContent =
+              j.error || "❌ Error during processing.";
+          } else if (j.message) {
+            status.textContent = j.message;
+          } else if (typeof j.count === "number") {
+            status.textContent = `✅ ${j.count} tabs saved.`;
+          } else {
+            status.textContent = "✅ Operation completed successfully.";
+          }
+        } catch (e) {
+          console.error("❌ Fetch error:", e);
+          status.textContent = "❌ Error connecting to server.";
+        }
+      });
     });
-  });
 
   // Open overlay
   openOverlayBtn.addEventListener("click", async () => {

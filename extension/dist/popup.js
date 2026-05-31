@@ -1,6 +1,21 @@
 "use strict";
 // popup.ts
 const SERVER = "http://localhost:8000";
+function getOrCreateUserId() {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(["userId"], (data) => {
+            const existingUserId = data.userId;
+            if (existingUserId) {
+                resolve(existingUserId);
+                return;
+            }
+            const userId = crypto.randomUUID();
+            chrome.storage.local.set({ userId }, () => {
+                resolve(userId);
+            });
+        });
+    });
+}
 document.addEventListener("DOMContentLoaded", () => {
     const collect = document.getElementById("collect");
     const chatBtn = document.getElementById("chatBtn");
@@ -99,24 +114,32 @@ document.addEventListener("DOMContentLoaded", () => {
             const tabs = await new Promise((res) => chrome.tabs.query({}, res));
             const docs = tabs
                 .filter((t) => t.url?.startsWith("http"))
-                .map((t) => ({ title: t.title || "", url: t.url }));
+                .map((t) => ({
+                title: t.title || "",
+                url: t.url,
+            }));
             try {
+                const userId = await getOrCreateUserId();
                 const r = await fetch(`${SERVER}/ingest`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ docs, apiKey }),
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        docs,
+                        apiKey,
+                        userId,
+                    }),
                 });
                 const j = await r.json();
-                // 🔹 Handle different responses:
                 if (!j.ok) {
-                    status.textContent = j.error || "❌ Error during processing.";
+                    status.textContent =
+                        j.error || "❌ Error during processing.";
                 }
                 else if (j.message) {
-                    // Server returned a custom message (e.g., "All tabs already saved")
                     status.textContent = j.message;
                 }
                 else if (typeof j.count === "number") {
-                    // Default: show number of tabs saved
                     status.textContent = `✅ ${j.count} tabs saved.`;
                 }
                 else {

@@ -114,13 +114,17 @@
             addMessage(question, true);
             input.value = "";
             try {
+                const storage = await chrome.storage.local.get(["userId"]);
                 const response = await fetch("http://localhost:8000/chat", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
                     body: JSON.stringify({
                         question,
                         apiKey,
-                        url: window.location.href, // ✅ اینجا URL تب فرستاده می‌شود
+                        url: window.location.href,
+                        userId: storage.userId,
                     }),
                 });
                 const data = await response.json();

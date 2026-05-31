@@ -154,10 +154,18 @@ function openSearchOverlay() {
             return;
         }
         try {
+            const storage = await chrome.storage.local.get(["userId"]);
+            const userId = storage.userId;
             const r = await fetch("http://localhost:8000/search", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ q, apiKey }),
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    q,
+                    apiKey,
+                    userId,
+                }),
             });
             const j = await r.json();
             if (!j.ok || !Array.isArray(j.results)) {
@@ -165,7 +173,8 @@ function openSearchOverlay() {
                 return;
             }
             if (j.results.length === 0) {
-                resultsDiv.innerHTML = "<div style='opacity:0.6;'>No results found</div>";
+                resultsDiv.innerHTML =
+                    "<div style='opacity:0.6;'>No results found</div>";
                 return;
             }
             resultsDiv.innerHTML = j.results
@@ -174,20 +183,21 @@ function openSearchOverlay() {
                 const url = escapeHtml(r.metadata?.url || "");
                 const snippet = escapeHtml(r.content?.slice(0, 200) || "");
                 return `
-            <div class="item">
-              <div style="font-weight:600;margin-bottom:3px;">${title}</div>
-              ${url
+        <div class="item">
+          <div style="font-weight:600;margin-bottom:3px;">${title}</div>
+          ${url
                     ? `<a href="${url}" target="_blank">${url}</a><br>`
                     : ""}
-              <small style="opacity:0.7;">${snippet}</small>
-            </div>
-          `;
+          <small style="opacity:0.7;">${snippet}</small>
+        </div>
+      `;
             })
                 .join("");
         }
         catch (err) {
             console.error("❌ Search request failed:", err);
-            resultsDiv.innerHTML = "<div style='color:red;'>❌ Error connecting to server</div>";
+            resultsDiv.innerHTML =
+                "<div style='color:red;'>❌ Error connecting to server</div>";
         }
     });
 }

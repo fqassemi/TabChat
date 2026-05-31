@@ -165,47 +165,60 @@ function openSearchOverlay(): void {
     }
 
     try {
-      const r = await fetch("http://localhost:8000/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q, apiKey }),
-      });
-      const j = await r.json();
+  const storage = await chrome.storage.local.get(["userId"]);
+  const userId = storage.userId;
 
-      if (!j.ok || !Array.isArray(j.results)) {
-        resultsDiv.innerHTML = `<div style='color:red;'>❌ Error: ${
-          j.error || "Invalid response from server"
-        }</div>`;
-        return;
-      }
+  const r = await fetch("http://localhost:8000/search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      q,
+      apiKey,
+      userId,
+    }),
+  });
 
-      if (j.results.length === 0) {
-        resultsDiv.innerHTML = "<div style='opacity:0.6;'>No results found</div>";
-        return;
-      }
+  const j = await r.json();
 
-      resultsDiv.innerHTML = j.results
-        .map((r: any) => {
-          const title = escapeHtml(r.metadata?.title || "Untitled");
-          const url = escapeHtml(r.metadata?.url || "");
-          const snippet = escapeHtml(r.content?.slice(0, 200) || "");
-          return `
-            <div class="item">
-              <div style="font-weight:600;margin-bottom:3px;">${title}</div>
-              ${
-                url
-                  ? `<a href="${url}" target="_blank">${url}</a><br>`
-                  : ""
-              }
-              <small style="opacity:0.7;">${snippet}</small>
-            </div>
-          `;
-        })
-        .join("");
-    } catch (err) {
-      console.error("❌ Search request failed:", err);
-      resultsDiv.innerHTML = "<div style='color:red;'>❌ Error connecting to server</div>";
-    }
+  if (!j.ok || !Array.isArray(j.results)) {
+    resultsDiv.innerHTML = `<div style='color:red;'>❌ Error: ${
+      j.error || "Invalid response from server"
+    }</div>`;
+    return;
+  }
+
+  if (j.results.length === 0) {
+    resultsDiv.innerHTML =
+      "<div style='opacity:0.6;'>No results found</div>";
+    return;
+  }
+
+  resultsDiv.innerHTML = j.results
+    .map((r: any) => {
+      const title = escapeHtml(r.metadata?.title || "Untitled");
+      const url = escapeHtml(r.metadata?.url || "");
+      const snippet = escapeHtml(r.content?.slice(0, 200) || "");
+
+      return `
+        <div class="item">
+          <div style="font-weight:600;margin-bottom:3px;">${title}</div>
+          ${
+            url
+              ? `<a href="${url}" target="_blank">${url}</a><br>`
+              : ""
+          }
+          <small style="opacity:0.7;">${snippet}</small>
+        </div>
+      `;
+    })
+    .join("");
+} catch (err) {
+  console.error("❌ Search request failed:", err);
+  resultsDiv.innerHTML =
+    "<div style='color:red;'>❌ Error connecting to server</div>";
+}
   });
 }
 

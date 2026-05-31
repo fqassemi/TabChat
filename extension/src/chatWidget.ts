@@ -122,28 +122,37 @@
     }
 
     async function sendQuestion() {
-      const question = input.value.trim();
-      if (!question) return;
-      addMessage(question, true);
-      input.value = "";
+  const question = input.value.trim();
 
-      try {
-        const response = await fetch("http://localhost:8000/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            question,
-            apiKey,
-            url: window.location.href, // ✅ اینجا URL تب فرستاده می‌شود
-          }),
-        });
-        const data = await response.json();
-        addMessage(data.answer || "No answer.", false);
-      } catch (err) {
-        console.error(err);
-        addMessage("Error contacting server.", false);
-      }
-    }
+  if (!question) return;
+
+  addMessage(question, true);
+  input.value = "";
+
+  try {
+    const storage = await chrome.storage.local.get(["userId"]);
+
+    const response = await fetch("http://localhost:8000/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        question,
+        apiKey,
+        url: window.location.href,
+        userId: storage.userId,
+      }),
+    });
+
+    const data = await response.json();
+
+    addMessage(data.answer || "No answer.", false);
+  } catch (err) {
+    console.error(err);
+    addMessage("Error contacting server.", false);
+  }
+}
 
     sendBtn.addEventListener("click", sendQuestion);
     input.addEventListener("keypress", (e) => {
