@@ -50,15 +50,30 @@ if (vectorStore) {
 app.use(cors({ origin: "*" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 
+
+function normalizeUrl(url?: string) {
+  return (url || "")
+    .split("?")[0]
+    .replace(/\/$/, "")
+    .replace(/^https?:\/\/(www\.)?/, "")
+    .toLowerCase();
+}
+
 // ------------------ Ingest ------------------
 app.post("/ingest", async (req, res) => {
-  const { docs, apiKey } = req.body;
+  const { docs, apiKey, userId } = req.body;
 
   if (!isDbConfigured || !vectorStore)
     return res.status(400).json({ ok: false, error: "❌ No database configured." });
 
   if (!apiKey || !apiKey.startsWith("sk-"))
     return res.status(400).json({ ok: false, error: "❌ Missing or invalid OpenAI API key" });
+
+  if (!userId)
+  return res.status(400).json({
+    ok: false,
+    error: "Missing userId",
+  });
 
   if (!Array.isArray(docs) || !docs.length)
     return res.status(400).json({ ok: false, error: "❌ Invalid or empty docs array." });
@@ -121,6 +136,7 @@ app.post("/ingest", async (req, res) => {
           allDocsToSave.push({
             text: chunk,
             metadata: {
+              userId,
               title: doc.title || "Untitled",
               url: doc.url,
               part: i + 1,
@@ -141,7 +157,11 @@ app.post("/ingest", async (req, res) => {
 
     // Sync with FAISS index
     if (!faissEngine) faissEngine = new FaissSearchEngine("./data/faiss.index");
-    await faissEngine.syncFromDocuments(allDocsToSave, apiKey);
+    await faissEngine.syncFromDocuments(
+      allDocsToSave,
+      apiKey,
+      userId
+    );
 
     res.json({
       ok: true,
@@ -157,78 +177,100 @@ app.post("/ingest", async (req, res) => {
 
 // ------------------ Chat ------------------
 app.post("/chat", async (req, res) => {
-  const { question, apiKey, url } = req.body; // 👈 حالا url از فرانت هم میاد
-  if (!question?.trim()) return res.status(400).json({ answer: "Question required." });
-  if (!apiKey || !apiKey.startsWith("sk-"))
-    return res.status(400).json({ answer: "Missing or invalid OpenAI API key" });
-  if (!isDbConfigured || !vectorStore)
-    return res.status(400).json({ answer: "❌ No database configured." });
+  const { question, apiKey, url, userId } = req.body;
+
+  if (!question?.trim()) {
+    return res.status(400).json({ answer: "Question required." });
+  }
+
+  if (!apiKey || !apiKey.startsWith("sk-")) {
+    return res.status(400).json({ answer: "Invalid API key" });
+  }
+
+  if (!vectorStore) {
+    return res.status(400).json({ answer: "No DB configured" });
+  }
 
   try {
-    const chatLLM = new ChatOpenAI({ apiKey, temperature: 0 });
-
-    // ✅ اطمینان از آماده بودن FAISS
     if (!faissEngine) {
-      faissEngine = new FaissSearchEngine("./data/faiss.index");
-      await faissEngine.init(apiKey);
+      faissEngine = new FaissSearchEngine("./data/faiss");
     }
 
-    // 🧠 مرحله ۱: جستجو در FAISS
-    let allResults = await faissEngine.search(question, apiKey, 10);
+    const allResults = await faissEngine.search(
+      question,
+      apiKey,
+      userId,
+      10
+    );
 
-    // 🧩 فیلتر بر اساس تب فعلی
-    let filteredResults = url
-      ? allResults.filter((r) => r.metadata?.url === url)
-      : allResults;
+    // ------------------------------
+    // URL normalizer (safe + consistent)
+    // ------------------------------
+    const normalizeUrl = (input?: string) => {
+      if (!input) return "";
+      return input
+        .split("?")[0]
+        .replace(/\/$/, "")
+        .replace(/^https?:\/\/(www\.)?/, "")
+        .toLowerCase();
+    };
 
-    // ⚙️ اگر چیزی برای تب فعلی پیدا نشد، fallback به کل ایندکس یا DB
+    // ------------------------------
+    // Tab filtering (FIXED)
+    // ------------------------------
+    let filteredResults = allResults;
+
+    if (url && typeof url === "string") {
+      const targetUrl = normalizeUrl(url);
+
+      filteredResults = allResults.filter((r) => {
+        const rUrl = r.metadata?.url;
+        if (!rUrl) return false;
+
+        return normalizeUrl(rUrl) === targetUrl;
+      });
+    }
+
+    // ------------------------------
+    // fallback if empty
+    // ------------------------------
     if (!filteredResults.length) {
-      console.log("⚠️ No tab-specific FAISS results — using all FAISS data.");
+      console.log(
+        "⚠️ No tab-specific FAISS results — using all FAISS data."
+      );
       filteredResults = allResults;
     }
 
-    // 🔁 اگر FAISS کاملاً خالی بود → fallback به vectorStore (مثلاً Supabase)
-    if (!filteredResults.length && vectorStore?.similaritySearch) {
-      console.log("⚠️ No FAISS results — falling back to DB vector search...");
-      if (typeof vectorStore.similaritySearch === "function") {
-        const dbResults = await vectorStore.similaritySearch(question, 5, apiKey);
-        filteredResults = dbResults.map((r: any) => ({
-          text: r.text || r.content,
-          metadata: r.metadata || {},
-          score: r.score || 0,
-        }));
-      }
-    }
+    // ------------------------------
+    // build context
+    // ------------------------------
+    const context = filteredResults
+      .map((r) => r.text)
+      .join("\n\n");
 
-    // 🧩 اگر هنوز خالی بود، پاسخ پیش‌فرض بده
-    if (!filteredResults.length)
-      return res.json({ answer: "No relevant information found for this tab." });
+    const chatLLM = new ChatOpenAI({
+      apiKey,
+      temperature: 0,
+    });
 
-    // 🧱 ساخت context از داده‌ها
-    const context = filteredResults.map((r) => r.text).join("\n\n");
-
-    const fullPrompt = `
-      Answer concisely based on the following context (from this tab only):
-      ${context}
-
-      Question: ${question}
-    `;
-
-    // 🧠 تولید پاسخ با ChatOpenAI
-    const response = await chatLLM.generate([
-      [
-        { role: "system", content: "You are a helpful assistant that answers based on given context." },
-        { role: "user", content: fullPrompt },
-      ],
+    const response = await chatLLM.invoke([
+      {
+        role: "system",
+        content:
+          "Answer only using the provided context. If context is insufficient, say you don't know.",
+      },
+      {
+        role: "user",
+        content: `Context:\n${context}\n\nQuestion: ${question}`,
+      },
     ]);
 
-    res.json({ answer: response.generations[0][0].text.trim() });
+    res.json({ answer: response.content });
   } catch (err: any) {
     console.error("❌ Chat error:", err);
-    res.status(500).json({ answer: "Server error." });
+    res.status(500).json({ answer: "Server error" });
   }
 });
-
 // ------------------ Config Switching ------------------
 app.post("/config", async (req, res) => {
   const { supabaseUrl, supabaseKey, localDbUrl, sqlitePath } = req.body;
@@ -259,7 +301,7 @@ app.post("/config", async (req, res) => {
 
 // ------------------ Search ------------------
 app.post("/search", async (req, res) => {
-  const { q, apiKey } = req.body;
+  const { q, apiKey, userId } = req.body;
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
   if (!apiKey || !apiKey.startsWith("sk-"))
     return res.status(400).json({ ok: false, error: "Missing or invalid OpenAI API key" });
@@ -272,7 +314,12 @@ app.post("/search", async (req, res) => {
       await faissEngine.init(apiKey);
     }
 
-    const results = await faissEngine.search(q, apiKey, 5);
+    const results = await faissEngine.search(
+      q,
+      apiKey,
+      userId,
+      5
+    );
 
     // Filter out "init" and normalize metadata
     const cleanResults = results
