@@ -115,7 +115,7 @@
             input.value = "";
             try {
                 const storage = await chrome.storage.local.get(["userId"]);
-                const response = await fetch("http://localhost:8000/chat", {
+                const response = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/chat", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",

@@ -168,7 +168,7 @@ function openSearchOverlay(): void {
   const storage = await chrome.storage.local.get(["userId"]);
   const userId = storage.userId;
 
-  const r = await fetch("http://localhost:8000/search", {
+  const r = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

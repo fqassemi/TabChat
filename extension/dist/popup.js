@@ -1,6 +1,6 @@
 "use strict";
 // popup.ts
-const SERVER = "http://localhost:8000";
+const SERVER = "https://katelynn-nonsegmented-melvina.ngrok-free.dev";
 function getOrCreateUserId() {
     return new Promise((resolve) => {
         chrome.storage.local.get(["userId"], (data) => {
