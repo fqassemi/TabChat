@@ -13,6 +13,8 @@ import { FaissSearchEngine } from "./vectorstores/FaissSearchEngine.ts";
 
 const app = express();
 
+const FAISS_PATH = "./data/faiss";
+
 // ------------------ ENV ------------------
 const FIRECRAWL_API = "https://api.firecrawl.dev/v2/scrape";
 const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY!;
@@ -43,7 +45,7 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
 
 if (vectorStore) {
   await vectorStore.init();
-  faissEngine = new FaissSearchEngine("./data/faiss.index");
+  faissEngine = new FaissSearchEngine(FAISS_PATH);
 }
 
 // ------------------ Middleware ------------------
@@ -70,10 +72,7 @@ app.post("/ingest", async (req, res) => {
     return res.status(400).json({ ok: false, error: "❌ Missing or invalid OpenAI API key" });
 
   if (!userId)
-  return res.status(400).json({
-    ok: false,
-    error: "Missing userId",
-  });
+    return res.status(400).json({ ok: false, error: "Missing userId" });
 
   if (!Array.isArray(docs) || !docs.length)
     return res.status(400).json({ ok: false, error: "❌ Invalid or empty docs array." });
@@ -83,7 +82,11 @@ app.post("/ingest", async (req, res) => {
   try {
     const existingDocs = await vectorStore.getAllDocuments();
     const existingUrls = new Set(existingDocs.map((d: any) => d.metadata?.url).filter(Boolean));
-    const uniqueDocs = docs.filter((d) => !existingUrls.has(d.url));
+
+    const uniqueDocs = docs.filter((d) => {
+      if (existingUrls.has(d.url)) return false;
+      return true;
+    });
 
     if (uniqueDocs.length === 0)
       return res.json({ ok: true, message: "⚠️ All tabs already exist." });
@@ -96,9 +99,10 @@ app.post("/ingest", async (req, res) => {
         const payload = {
           url: doc.url,
           formats: ["markdown"],
-          excludeTags: ["nav", "footer", "header", "script", "style"],
+          onlyMainContent: false,
+          excludeTags: ["header", "footer", "head", "meta", "script", "style", "noscript"],
           blockAds: true,
-          waitFor: 2000,
+          waitFor: 3000,
         };
 
         const response = await fetch(FIRECRAWL_API, {
@@ -114,20 +118,28 @@ app.post("/ingest", async (req, res) => {
         const markdown = (data?.data?.markdown || "").trim();
         if (!markdown) continue;
 
-        // Split content
+        // ─── Chunking ───
         const chunks: string[] = [];
-        const maxLen = 5000;
+        const maxLen = 800;
         let buffer = "";
         const paragraphs = markdown.split(/\n{2,}/);
+
         for (const para of paragraphs) {
           const trimmed = para.trim();
           if (!trimmed) continue;
+
+          // فقط پاراگراف‌هایی که اصلاً متن ندارن حذف میشن
+          const textOnly = trimmed.replace(/\[.*?\]\(.*?\)/g, "").replace(/!\[.*?\]\(.*?\)/g, "").trim();
+          if (textOnly.length < 2) continue;
+
           if ((buffer + "\n\n" + trimmed).length > maxLen) {
-            if (buffer.trim().length > 50) chunks.push(buffer.trim());
+            if (buffer.trim().length > 30) chunks.push(buffer.trim());
             buffer = trimmed;
-          } else buffer += (buffer ? "\n\n" : "") + trimmed;
+          } else {
+            buffer += (buffer ? "\n\n" : "") + trimmed;
+          }
         }
-        if (buffer.trim().length > 50) chunks.push(buffer.trim());
+        if (buffer.trim().length > 30) chunks.push(buffer.trim());
         if (!chunks.length) continue;
 
         countTabs++;
@@ -152,16 +164,10 @@ app.post("/ingest", async (req, res) => {
     if (!allDocsToSave.length)
       return res.status(400).json({ ok: false, message: "❌ No valid content retrieved." });
 
-    // Save to main DB
     await vectorStore.addDocuments(allDocsToSave, apiKey);
 
-    // Sync with FAISS index
-    if (!faissEngine) faissEngine = new FaissSearchEngine("./data/faiss.index");
-    await faissEngine.syncFromDocuments(
-      allDocsToSave,
-      apiKey,
-      userId
-    );
+    if (!faissEngine) faissEngine = new FaissSearchEngine(FAISS_PATH);
+    await faissEngine.syncFromDocuments(allDocsToSave, apiKey, userId);
 
     res.json({
       ok: true,
@@ -193,7 +199,7 @@ app.post("/chat", async (req, res) => {
 
   try {
     if (!faissEngine) {
-      faissEngine = new FaissSearchEngine("./data/faiss");
+      faissEngine = new FaissSearchEngine(FAISS_PATH);
     }
 
     const allResults = await faissEngine.search(
@@ -203,9 +209,8 @@ app.post("/chat", async (req, res) => {
       10
     );
 
-    // ------------------------------
-    // URL normalizer (safe + consistent)
-    // ------------------------------
+
+    // ---------------- URL normalizer ----------------
     const normalizeUrl = (input?: string) => {
       if (!input) return "";
       return input
@@ -215,9 +220,7 @@ app.post("/chat", async (req, res) => {
         .toLowerCase();
     };
 
-    // ------------------------------
-    // Tab filtering (FIXED)
-    // ------------------------------
+    // ---------------- Filter by tab ----------------
     let filteredResults = allResults;
 
     if (url && typeof url === "string") {
@@ -225,28 +228,40 @@ app.post("/chat", async (req, res) => {
 
       filteredResults = allResults.filter((r) => {
         const rUrl = r.metadata?.url;
-        if (!rUrl) return false;
-
-        return normalizeUrl(rUrl) === targetUrl;
+        return rUrl && normalizeUrl(rUrl) === targetUrl;
       });
     }
 
-    // ------------------------------
-    // fallback if empty
-    // ------------------------------
+    // fallback
     if (!filteredResults.length) {
-      console.log(
-        "⚠️ No tab-specific FAISS results — using all FAISS data."
-      );
       filteredResults = allResults;
     }
 
-    // ------------------------------
-    // build context
-    // ------------------------------
-    const context = filteredResults
-      .map((r) => r.text)
+    // =================================================
+    // 🔥 FIX #1: limit results (VERY IMPORTANT)
+    // =================================================
+    const topResults = filteredResults
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .slice(0, 4);
+
+    // =================================================
+    // 🔥 FIX #2: limit each chunk size
+    // =================================================
+    const MAX_CHUNK_SIZE = 1200;
+
+    const context = topResults
+      .map((r) => (r.text || "").slice(0, MAX_CHUNK_SIZE))
       .join("\n\n");
+
+    // =================================================
+    // 🔥 FIX #3: hard stop if still too big
+    // =================================================
+    const MAX_CONTEXT_SIZE = 6000;
+
+    const safeContext =
+      context.length > MAX_CONTEXT_SIZE
+        ? context.slice(0, MAX_CONTEXT_SIZE)
+        : context;
 
     const chatLLM = new ChatOpenAI({
       apiKey,
@@ -257,18 +272,27 @@ app.post("/chat", async (req, res) => {
       {
         role: "system",
         content:
-          "Answer only using the provided context. If context is insufficient, say you don't know.",
+          ` You are a helpful assistant. Answer questions using ONLY the provided context.
+            If the answer exists in the context, answer it clearly and completely.
+            Do NOT say "I don't know" if the information is present in the context.
+            Answer in the language the question was asked.`,
       },
       {
         role: "user",
-        content: `Context:\n${context}\n\nQuestion: ${question}`,
+        content: `Context:\n${safeContext}\n\nQuestion: ${question}`,
       },
     ]);
 
     res.json({ answer: response.content });
   } catch (err: any) {
     console.error("❌ Chat error:", err);
-    res.status(500).json({ answer: "Server error" });
+    res.status(500).json({ answer: "Server error",sources: topResults.map(r => ({
+    score: r.score,
+    url: r.metadata?.url,
+    title: r.metadata?.title,
+    part: r.metadata?.part,
+    preview: r.text.slice(0, 150) // ✅ اول ۱۵۰ کاراکتر چانک
+  })) });
   }
 });
 // ------------------ Config Switching ------------------
@@ -310,7 +334,7 @@ app.post("/search", async (req, res) => {
 
   try {
     if (!faissEngine) {
-      faissEngine = new FaissSearchEngine("./data/faiss.index");
+      faissEngine = new FaissSearchEngine(FAISS_PATH);
       await faissEngine.init(apiKey);
     }
 
