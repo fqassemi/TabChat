@@ -72,7 +72,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const docs = tabs
           .filter((t) => t.url?.startsWith("http"))
-          .filter((t) => t.active)
           .map((t) => ({
             title: t.title || "",
             url: t.url!,

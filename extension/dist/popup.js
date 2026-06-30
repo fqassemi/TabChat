@@ -53,7 +53,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const tabs = await new Promise((res) => chrome.tabs.query({}, res));
             const docs = tabs
                 .filter((t) => t.url?.startsWith("http"))
-                .filter((t) => t.active)
                 .map((t) => ({
                 title: t.title || "",
                 url: t.url,
