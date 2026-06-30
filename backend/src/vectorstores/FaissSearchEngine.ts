@@ -144,6 +144,40 @@ export class FaissSearchEngine {
       );
     }
   }
+    private getMetadataPath(userId: string) {
+      return path.join(this.basePath, `${userId}-metadata.json`);
+    }
+
+    async getExistingUrls(userId: string): Promise<Set<string>> {
+      const file = this.getMetadataPath(userId);
+
+      if (!fs.existsSync(file)) {
+        return new Set();
+      }
+
+      const json = JSON.parse(fs.readFileSync(file, "utf8"));
+
+      return new Set(json.urls || []);
+    }
+
+    async saveUrls(userId: string, urls: string[]) {
+      const file = this.getMetadataPath(userId);
+
+      const existing = await this.getExistingUrls(userId);
+
+      urls.forEach((u) => existing.add(u));
+
+      fs.writeFileSync(
+        file,
+        JSON.stringify(
+          {
+            urls: [...existing],
+          },
+          null,
+          2
+        )
+      );
+    }
 
   async search(
     query: string,
@@ -162,36 +196,31 @@ export class FaissSearchEngine {
     }
 
     try {
-      const results = await store.similaritySearch(
+      const results = await store.similaritySearchWithScore(
         query,
         k
       );
 
       if (!results.length) {
-        console.warn(
-          `⚠️ No FAISS results for user ${userId}`
-        );
-        return [];
+          console.warn(`⚠️ No FAISS results for user ${userId}`);
+          return [];
       }
 
-      return results
+        return results
         .filter(
-          (r) =>
-            r.pageContent !== "init" &&
-            r.metadata?.meta !== "init"
+            ([doc]) =>
+            doc.pageContent !== "init" &&
+            doc.metadata?.meta !== "init"
         )
-        .map((r) => ({
-          text: r.pageContent,
-          metadata: {
-            userId: r.metadata?.userId,
-            title:
-              r.metadata?.title || "Untitled",
-            url:
-              r.metadata?.url || "",
-            part:
-              r.metadata?.part || 1,
-          },
-          score: 0,
+        .map(([doc, score]) => ({
+            text: doc.pageContent,
+            metadata: {
+                userId: doc.metadata?.userId,
+                title: doc.metadata?.title || "Untitled",
+                url: doc.metadata?.url || "",
+                part: doc.metadata?.part || 1,
+            },
+            score,
         }));
     } catch (err) {
       console.error(

@@ -26,36 +26,7 @@
   </style>
 </head>
 <body>
-  <h3>Database Configuration</h3>
-
-  <label>Database Type:</label>
-  <select id="dbSelect">
-    <option value="supabase">Supabase</option>
-    <option value="local">Postgres (Local)</option>
-    <option value="sqlite">SQLite</option>
-  </select>
-
-  <div id="supabaseConfig" style="display:none;">
-    <label>Supabase URL:</label>
-    <input type="text" id="supabaseUrl" placeholder="https://xyz.supabase.co" />
-    <label>Service Role Key:</label>
-    <input type="password" id="supabaseKey" placeholder="SUPABASE_SERVICE_ROLE_KEY" />
-  </div>
-
-  <div id="localConfig" style="display:none;">
-    <label>Postgres Connection String:</label>
-    <input type="text" id="localDbUrl" placeholder="postgresql://user:pass@localhost:5432/dbname" />
-  </div>
-
-  <div id="sqliteConfig" style="display:none;">
-    <label>SQLite File Path:</label>
-    <input type="text" id="sqlitePath" placeholder="/Users/nima/Desktop/local.sqlite" />
-  </div>
-
-  <button id="saveConfig">Save Config</button>
-  <div id="configStatus"></div>
-
-  <hr />
+<h1>TabChat</h1>
 
   <h3>LLM Configuration</h3>
   <label>OpenAI API Key:</label>

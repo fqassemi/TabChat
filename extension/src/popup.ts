@@ -20,13 +20,6 @@ function getOrCreateUserId(): Promise<string> {
   });
 }
 
-interface DBConfig {
-  type: "supabase" | "local" | "sqlite";
-  supabaseUrl?: string;
-  supabaseKey?: string;
-  localDbUrl?: string;
-  sqlitePath?: string;
-}
 
 document.addEventListener("DOMContentLoaded", () => {
   const collect = document.getElementById("collect") as HTMLButtonElement;
@@ -34,12 +27,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const openOverlayBtn = document.getElementById("openOverlay") as HTMLButtonElement;
   const status = document.getElementById("status") as HTMLDivElement;
 
-  const dbSelect = document.getElementById("dbSelect") as HTMLSelectElement;
-  const supabaseConfig = document.getElementById("supabaseConfig") as HTMLDivElement;
-  const localConfig = document.getElementById("localConfig") as HTMLDivElement;
-  const sqliteConfig = document.getElementById("sqliteConfig") as HTMLDivElement;
-  const saveConfig = document.getElementById("saveConfig") as HTMLButtonElement;
-  const configStatus = document.getElementById("configStatus") as HTMLDivElement;
 
   const openaiKeyInput = document.getElementById("openaiKey") as HTMLInputElement;
   const saveApiKeyBtn = document.getElementById("saveApiKey") as HTMLButtonElement;
@@ -47,29 +34,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   console.log("Popup loaded ✅");
 
-  // Change form based on selected database type
-  dbSelect.addEventListener("change", () => {
-    supabaseConfig.style.display = dbSelect.value === "supabase" ? "block" : "none";
-    localConfig.style.display = dbSelect.value === "local" ? "block" : "none";
-    sqliteConfig.style.display = dbSelect.value === "sqlite" ? "block" : "none";
-  });
 
   // Load saved settings
-  chrome.storage.local.get(["dbConfig", "openaiKey"], (data) => {
-    const conf = (data.dbConfig as DBConfig) || { type: "sqlite" };
-    dbSelect.value = conf.type;
-
-    if (conf.type === "supabase") {
-      supabaseConfig.style.display = "block";
-      (document.getElementById("supabaseUrl") as HTMLInputElement).value = conf.supabaseUrl || "";
-      (document.getElementById("supabaseKey") as HTMLInputElement).value = conf.supabaseKey || "";
-    } else if (conf.type === "local") {
-      localConfig.style.display = "block";
-      (document.getElementById("localDbUrl") as HTMLInputElement).value = conf.localDbUrl || "";
-    } else if (conf.type === "sqlite") {
-      sqliteConfig.style.display = "block";
-      (document.getElementById("sqlitePath") as HTMLInputElement).value = conf.sqlitePath || "";
-    }
+  chrome.storage.local.get(["openaiKey"], (data) => {
 
     if (data.openaiKey) openaiKeyInput.value = "********";
   });
@@ -86,37 +53,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Save database configuration
-  saveConfig.addEventListener("click", async () => {
-    const selected = dbSelect.value as DBConfig["type"];
-    let payload: Partial<DBConfig> = { type: selected };
-
-    if (selected === "supabase") {
-      const supabaseUrl = (document.getElementById("supabaseUrl") as HTMLInputElement).value.trim();
-      const supabaseKey = (document.getElementById("supabaseKey") as HTMLInputElement).value.trim();
-      payload = { ...payload, supabaseUrl, supabaseKey };
-    } else if (selected === "local") {
-      const localDbUrl = (document.getElementById("localDbUrl") as HTMLInputElement).value.trim();
-      payload = { ...payload, localDbUrl };
-    } else if (selected === "sqlite") {
-      const sqlitePath = (document.getElementById("sqlitePath") as HTMLInputElement).value.trim();
-      payload = { ...payload, sqlitePath };
-    }
-
-    try {
-      const res = await fetch(`${SERVER}/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (json.ok) configStatus.textContent = `✅ Database configured: ${json.mode}`;
-      else configStatus.textContent = `❌ Server error: ${json.error || "Unknown error"}`;
-      chrome.storage.local.set({ dbConfig: payload });
-    } catch (err) {
-      configStatus.textContent = "❌ Error connecting to server.";
-    }
-  });
 
   // Collect tabs
     collect.addEventListener("click", async () => {

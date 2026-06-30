@@ -5,10 +5,6 @@ import express from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
 import { OpenAIEmbeddings, ChatOpenAI } from "@langchain/openai";
-import type { IVectorStore } from "./IVectorStore.ts";
-import { SupabaseVectorStoreImpl } from "./vectorstores/SupabaseVectorStoreImpl.ts";
-import { LocalDBVectorStoreImpl } from "./vectorstores/LocalDBVectorStoreImpl.ts";
-import { SQLiteVectorStoreImpl } from "./vectorstores/SQLiteVectorStoreImpl.ts";
 import { FaissSearchEngine } from "./vectorstores/FaissSearchEngine.ts";
 
 const app = express();
@@ -18,35 +14,12 @@ const FAISS_PATH = "./data/faiss";
 // ------------------ ENV ------------------
 const FIRECRAWL_API = "https://api.firecrawl.dev/v2/scrape";
 const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY!;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const LOCAL_DB_URL = process.env.LOCAL_DB_URL;
 
 // ------------------ Global State ------------------
-let vectorStore: IVectorStore | null = null;
 let faissEngine: FaissSearchEngine | null = null;
-let currentDBMode: "supabase" | "local" | "sqlite" | null = null;
-let isDbConfigured = false;
 
 // ------------------ Database Initialization ------------------
-if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-  console.log("🟢 Using Supabase as default database");
-  vectorStore = new SupabaseVectorStoreImpl(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  currentDBMode = "supabase";
-  isDbConfigured = true;
-} else if (LOCAL_DB_URL) {
-  console.log("🟠 Using Local Postgres as default database");
-  vectorStore = new LocalDBVectorStoreImpl(LOCAL_DB_URL);
-  currentDBMode = "local";
-  isDbConfigured = true;
-} else {
-  console.log("🟣 No database configured yet — waiting for user configuration");
-}
-
-if (vectorStore) {
-  await vectorStore.init();
-  faissEngine = new FaissSearchEngine(FAISS_PATH);
-}
+faissEngine = new FaissSearchEngine(FAISS_PATH);
 
 // ------------------ Middleware ------------------
 app.use(cors({ origin: "*" }));
@@ -65,9 +38,6 @@ function normalizeUrl(url?: string) {
 app.post("/ingest", async (req, res) => {
   const { docs, apiKey, userId } = req.body;
 
-  if (!isDbConfigured || !vectorStore)
-    return res.status(400).json({ ok: false, error: "❌ No database configured." });
-
   if (!apiKey || !apiKey.startsWith("sk-"))
     return res.status(400).json({ ok: false, error: "❌ Missing or invalid OpenAI API key" });
 
@@ -80,8 +50,7 @@ app.post("/ingest", async (req, res) => {
   const embedder = new OpenAIEmbeddings({ apiKey });
 
   try {
-    const existingDocs = await vectorStore.getAllDocuments();
-    const existingUrls = new Set(existingDocs.map((d: any) => d.metadata?.url).filter(Boolean));
+    const existingUrls = await faissEngine.getExistingUrls(userId);
 
     const uniqueDocs = docs.filter((d) => {
       if (existingUrls.has(d.url)) return false;
@@ -164,10 +133,13 @@ app.post("/ingest", async (req, res) => {
     if (!allDocsToSave.length)
       return res.status(400).json({ ok: false, message: "❌ No valid content retrieved." });
 
-    await vectorStore.addDocuments(allDocsToSave, apiKey);
 
     if (!faissEngine) faissEngine = new FaissSearchEngine(FAISS_PATH);
     await faissEngine.syncFromDocuments(allDocsToSave, apiKey, userId);
+    await faissEngine.saveUrls(
+      userId,
+      uniqueDocs.map((d) => d.url)
+    );
 
     res.json({
       ok: true,
@@ -193,9 +165,6 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ answer: "Invalid API key" });
   }
 
-  if (!vectorStore) {
-    return res.status(400).json({ answer: "No DB configured" });
-  }
 
   try {
     if (!faissEngine) {
@@ -241,7 +210,7 @@ app.post("/chat", async (req, res) => {
     // 🔥 FIX #1: limit results (VERY IMPORTANT)
     // =================================================
     const topResults = filteredResults
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
       .slice(0, 4);
 
     // =================================================
@@ -295,33 +264,7 @@ app.post("/chat", async (req, res) => {
   })) });
   }
 });
-// ------------------ Config Switching ------------------
-app.post("/config", async (req, res) => {
-  const { supabaseUrl, supabaseKey, localDbUrl, sqlitePath } = req.body;
 
-  try {
-    if (supabaseUrl && supabaseKey) {
-      console.log("🟢 Switching to Supabase...");
-      vectorStore = new SupabaseVectorStoreImpl(supabaseUrl, supabaseKey);
-      currentDBMode = "supabase";
-    } else if (localDbUrl) {
-      console.log("🟠 Switching to Local Postgres...");
-      vectorStore = new LocalDBVectorStoreImpl(localDbUrl);
-      currentDBMode = "local";
-    } else if (sqlitePath) {
-      console.log("🟣 Switching to SQLite...");
-      vectorStore = new SQLiteVectorStoreImpl(sqlitePath);
-      currentDBMode = "sqlite";
-    } else throw new Error("No valid configuration provided");
-
-    await vectorStore.init();
-    isDbConfigured = true;
-    res.json({ ok: true, mode: currentDBMode });
-  } catch (err: any) {
-    console.error("❌ Config switch failed:", err);
-    res.json({ ok: false, error: err.message });
-  }
-});
 
 // ------------------ Search ------------------
 app.post("/search", async (req, res) => {
@@ -329,8 +272,6 @@ app.post("/search", async (req, res) => {
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
   if (!apiKey || !apiKey.startsWith("sk-"))
     return res.status(400).json({ ok: false, error: "Missing or invalid OpenAI API key" });
-  if (!isDbConfigured || !vectorStore)
-    return res.status(400).json({ ok: false, error: "❌ No database configured." });
 
   try {
     if (!faissEngine) {
