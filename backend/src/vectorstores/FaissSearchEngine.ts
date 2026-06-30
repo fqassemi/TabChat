@@ -1,0 +1,233 @@
+import fs from "fs";
+import path from "path";
+import { FaissStore } from "@langchain/community/vectorstores/faiss";
+import { OpenAIEmbeddings } from "@langchain/openai";
+
+export class FaissSearchEngine {
+  private basePath: string;
+  private stores: Map<string, FaissStore> = new Map();
+  private embedder: OpenAIEmbeddings | null = null;
+
+  constructor(basePath = "./data/faiss") {
+    this.basePath = basePath;
+  }
+
+  private getUserPath(userId: string): string {
+    return path.join(this.basePath, userId);
+  }
+
+  async init(apiKey: string, userId: string) {
+    if (!userId) {
+      throw new Error("userId is required");
+    }
+
+    if (!this.embedder) {
+      this.embedder = new OpenAIEmbeddings({ apiKey });
+    }
+
+    if (this.stores.has(userId)) {
+      return;
+    }
+
+    const userPath = this.getUserPath(userId);
+
+    if (!fs.existsSync(this.basePath)) {
+      fs.mkdirSync(this.basePath, { recursive: true });
+    }
+
+    try {
+      if (fs.existsSync(userPath)) {
+        console.log(`📂 Loading FAISS index for user ${userId}`);
+
+        const store = await FaissStore.load(
+          userPath,
+          this.embedder
+        );
+
+        this.stores.set(userId, store);
+
+        console.log(
+          `✅ FAISS index loaded for user ${userId}`
+        );
+      } else {
+        console.log(
+          `🆕 Creating FAISS index for user ${userId}`
+        );
+
+        const store = await FaissStore.fromTexts(
+          ["init"],
+          [{ meta: "init" }],
+          this.embedder
+        );
+
+        await store.save(userPath);
+
+        this.stores.set(userId, store);
+
+        console.log(
+          `✅ New FAISS index created for user ${userId}`
+        );
+      }
+    } catch (err) {
+      console.error(
+        `❌ Failed loading FAISS for ${userId}`,
+        err
+      );
+
+      const store = await FaissStore.fromTexts(
+        ["init"],
+        [{ meta: "init" }],
+        this.embedder
+      );
+
+      await store.save(userPath);
+
+      this.stores.set(userId, store);
+    }
+  }
+
+  async syncFromDocuments(
+    docs: {
+      text: string;
+      metadata: any;
+      embedding?: number[];
+    }[],
+    apiKey: string,
+    userId: string
+  ) {
+    if (!docs?.length) {
+      console.warn(
+        "⚠️ No documents provided for FAISS sync."
+      );
+      return;
+    }
+
+    await this.init(apiKey, userId);
+
+    const store = this.stores.get(userId);
+
+    if (!store) {
+      throw new Error(
+        `FAISS store not initialized for user ${userId}`
+      );
+    }
+
+    const texts = docs.map((d) => d.text);
+
+    const metadatas = docs.map((d) => ({
+      userId,
+      title: d.metadata?.title || "Untitled",
+      url: d.metadata?.url || "",
+      part: d.metadata?.part || 1,
+    }));
+
+    try {
+      const newStore = await FaissStore.fromTexts(
+        texts,
+        metadatas,
+        this.embedder!
+      );
+
+      store.mergeFrom(newStore);
+
+      await store.save(
+        this.getUserPath(userId)
+      );
+
+      console.log(
+        `✅ Synced ${docs.length} chunks into FAISS for user ${userId}`
+      );
+    } catch (err) {
+      console.error(
+        "❌ Failed to sync FAISS index:",
+        err
+      );
+    }
+  }
+    private getMetadataPath(userId: string) {
+      return path.join(this.basePath, `${userId}-metadata.json`);
+    }
+
+    async getExistingUrls(userId: string): Promise<Set<string>> {
+      const file = this.getMetadataPath(userId);
+
+      if (!fs.existsSync(file)) {
+        return new Set();
+      }
+
+      const json = JSON.parse(fs.readFileSync(file, "utf8"));
+
+      return new Set(json.urls || []);
+    }
+
+    async saveUrls(userId: string, urls: string[]) {
+      const file = this.getMetadataPath(userId);
+
+      const existing = await this.getExistingUrls(userId);
+
+      urls.forEach((u) => existing.add(u));
+
+      fs.writeFileSync(
+        file,
+        JSON.stringify(
+          {
+            urls: [...existing],
+          },
+          null,
+          2
+        )
+      );
+    }
+
+  async search(
+    query: string,
+    apiKey: string,
+    userId: string,
+    k = 5
+  ) {
+    await this.init(apiKey, userId);
+
+    const store = this.stores.get(userId);
+
+    if (!store) {
+      throw new Error(
+        `FAISS store not found for user ${userId}`
+      );
+    }
+
+    try {
+      const results = await store.similaritySearchWithScore(
+        query,
+        k
+      );
+
+      if (!results.length) {
+          console.warn(`⚠️ No FAISS results for user ${userId}`);
+          return [];
+      }
+
+        return results
+        .filter(
+            ([doc]) =>
+            doc.pageContent !== "init" &&
+            doc.metadata?.meta !== "init"
+        )
+        .map(([doc, score]) => ({
+            text: doc.pageContent,
+            metadata: {
+                userId: doc.metadata?.userId,
+                title: doc.metadata?.title || "Untitled",
+                url: doc.metadata?.url || "",
+                part: doc.metadata?.part || 1,
+            },
+            score,
+        }));
+    } catch (err) {
+      console.error(
+        "❌ FAISS search failed:",
+        err
+      );
+      return [];
+    }
+  }
+}

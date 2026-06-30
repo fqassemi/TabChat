@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <meta charset="utf-8" />
+  <title>Tab RAG</title>
+  <script src="popup.js" defer></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 10px;
+      width: 340px;
+    }
+    label { font-weight: bold; }
+    input, select, button {
+      width: 100%;
+      margin-top: 4px;
+      margin-bottom: 10px;
+      padding: 6px;
+    }
+    hr { margin: 12px 0; }
+    #status, #configStatus, #apiKeyStatus {
+      color: #444;
+      font-size: 13px;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+<h1>TabChat</h1>
+
+  <h3>LLM Configuration</h3>
+  <label>OpenAI API Key:</label>
+  <input type="password" id="openaiKey" placeholder="sk-..." />
+  <button id="saveApiKey">Save API Key</button>
+  <div id="apiKeyStatus"></div>
+
+  <hr />
+
+  <button id="collect">Collecting Tabs</button>
+  <button id="openOverlay">Open search in tabs</button>
+  <button id="chatBtn">Open Chat for This Tab</button>
+
+  <div id="status"></div>
+  <hr>
+  <div id="results"></div>
+</body>
+</html>
