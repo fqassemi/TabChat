@@ -3,7 +3,7 @@
   "name": "TabChat",
   "version": "1.0",
   "description": "TabChat",
-  "permissions": ["tabs", "debugger", "storage", "activeTab", "scripting", "identity"],
+  "permissions": ["tabs", "debugger", "storage", "activeTab", "scripting", "identity", "notifications"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "dist/popup.html",
