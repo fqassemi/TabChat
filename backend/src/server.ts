@@ -250,6 +250,14 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
       userId,
       uniqueDocs.map((d) => d.url)
     );
+    await faissEngine.saveTabs(
+      userId,
+      uniqueDocs.map((d) => ({
+        title: d.title || "Untitled",
+        url: d.url,
+      }))
+    );
+
     ingestProgress.set(userId, {
           processed: uniqueDocs.length,
           total: uniqueDocs.length,
@@ -283,6 +291,41 @@ app.get("/ingest-status", requireAuth, (req: any, res) => {
   }
 
   res.json(state);
+});
+
+
+// ------------------ Get Tabs ------------------
+app.get("/tabs", requireAuth, async (req: any, res) => {
+  const userId = req.userId;
+
+  const limit = parseInt(req.query.limit || "5");
+  const offset = parseInt(req.query.offset || "0");
+
+  try {
+    if (!faissEngine) {
+      faissEngine = new FaissSearchEngine(FAISS_PATH);
+    }
+
+    const tabs = await faissEngine.getTabs(userId);
+
+    const paginated = tabs.slice(offset, offset + limit);
+
+    res.json({
+      ok: true,
+      total: tabs.length,
+      limit,
+      offset,
+      tabs: paginated,
+      hasMore: offset + limit < tabs.length,
+    });
+  } catch (err: any) {
+    console.error("❌ Get tabs error:", err);
+
+    res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
+  }
 });
 
 // ------------------ Chat ------------------
