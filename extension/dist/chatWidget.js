@@ -114,17 +114,22 @@
             addMessage(question, true);
             input.value = "";
             try {
-                const storage = await chrome.storage.local.get(["userId"]);
-                const response = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/chat", {
+                const storage = await chrome.storage.local.get(["token", "openaiKey",]);
+                const token = storage.token;
+                if (!token) {
+                    addMessage("❌ Please login first.", false);
+                    return;
+                }
+                const response = await fetch("http://127.0.0.1:8000/chat", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
                     },
                     body: JSON.stringify({
                         question,
                         apiKey,
                         url: window.location.href,
-                        userId: storage.userId,
                     }),
                 });
                 const data = await response.json();
