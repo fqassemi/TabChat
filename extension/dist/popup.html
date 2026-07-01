@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Tab RAG</title>
   <script src="popup.js" defer></script>
+  <link rel="stylesheet" href="popup.css">
   <style>
     body {
       font-family: sans-serif;
@@ -38,6 +39,14 @@
   <hr />
 
   <button id="collect">Collects Tabs</button>
+  <div class="progress-container">
+    <div id="progressFill" class="progress-fill"></div>
+  </div>
+
+  <div id="progressText" class="progress-text">
+    0%
+  </div>
+  <hr />
   <button id="openOverlay">Search Tabs</button>
   <button id="chatBtn">Chat with this tab</button>
 
