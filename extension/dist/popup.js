@@ -125,6 +125,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }, 500);
             const j = await (await ingestPromise).json();
+            if (j.skipped) {
+                clearInterval(interval);
+                progressFill.style.width = "0%";
+                progressText.textContent = "";
+                status.textContent = j.message;
+                return;
+            }
             if (!j.ok) {
                 status.textContent = j.error || "❌ Error during processing.";
                 return;
