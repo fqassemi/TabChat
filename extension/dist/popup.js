@@ -10,6 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveApiKeyBtn = document.getElementById("saveApiKey");
     const apiKeyStatus = document.getElementById("apiKeyStatus");
     const loginBtn = document.getElementById("loginBtn");
+    const progressText = document.getElementById("progressText");
+    const progressFill = document.getElementById("progressFill");
     console.log("Popup loaded ✅");
     // ------------------ LOAD API KEY ------------------
     chrome.storage.local.get(["openaiKey"], (data) => {
@@ -91,7 +93,9 @@ document.addEventListener("DOMContentLoaded", () => {
             id: t.id,
         }));
         try {
-            const r = await fetch(`${SERVER}/ingest`, {
+            progressText.textContent = "0%";
+            progressFill.style.width = "0%";
+            const ingestPromise = fetch(`${SERVER}/ingest`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -102,7 +106,25 @@ document.addEventListener("DOMContentLoaded", () => {
                     apiKey,
                 }),
             });
-            const j = await r.json();
+            const interval = setInterval(async () => {
+                const res = await fetch(`${SERVER}/ingest-status`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+                const data = await res.json();
+                const percent = data.total
+                    ? Math.floor((data.processed / data.total) * 100)
+                    : 0;
+                progressFill.style.width = `${percent}%`;
+                progressText.textContent = `${percent}%`;
+                if (data.done) {
+                    clearInterval(interval);
+                    progressFill.style.width = "100%";
+                    progressText.textContent = `✅ ${data.processed}/${data.total} Tabs`;
+                }
+            }, 500);
+            const j = await (await ingestPromise).json();
             if (!j.ok) {
                 status.textContent = j.error || "❌ Error during processing.";
                 return;
