@@ -3,7 +3,7 @@
   "name": "TabChat",
   "version": "1.0",
   "description": "TabChat",
-  "permissions": ["tabs", "debugger", "storage", "activeTab", "scripting"],
+  "permissions": ["tabs", "debugger", "storage", "activeTab", "scripting", "identity"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "dist/popup.html",
@@ -11,5 +11,13 @@
   },
   "background": {
     "service_worker": "dist/background.js"
+  },
+  "oauth2": {
+    "client_id": "366233102807-2finhnefuqoudh4oh4bpsejl9dfpullu.apps.googleusercontent.com",
+    "scopes": [
+      "openid",
+      "email",
+      "profile"
+    ]
   }
 }
