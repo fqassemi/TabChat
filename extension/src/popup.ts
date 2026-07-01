@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const chatBtn = document.getElementById("chatBtn") as HTMLButtonElement;
   const openOverlayBtn = document.getElementById("openOverlay") as HTMLButtonElement;
   const status = document.getElementById("status") as HTMLDivElement;
+  const collectStatus = document.getElementById("collectStatus") as HTMLDivElement;
 
 
   const openaiKeyInput = document.getElementById("openaiKey") as HTMLInputElement;
@@ -21,6 +22,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const progressText = document.getElementById("progressText") as HTMLDivElement;
   const progressFill = document.getElementById("progressFill") as HTMLDivElement;
+
+  const myTabsBtn = document.getElementById("myTabsBtn") as HTMLButtonElement;
+  const tabsContainer = document.getElementById("tabsContainer") as HTMLDivElement;
+  const tabsList = document.getElementById("tabsList") as HTMLDivElement;
+  const tabsSearch = document.getElementById("tabsSearch") as HTMLInputElement;
+  const loadMoreBtn = document.getElementById("loadMoreBtn") as HTMLButtonElement;
+  let allTabs: { title: string; url: string }[] = [];
+
+  let offset = 0;
+  const limit = 5;
+  let loading = false;
+  let hasMore = true;
 
   console.log("Popup loaded ✅");
 
@@ -91,7 +104,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Collect tabs
     collect.addEventListener("click", async () => {
-      status.textContent = "Collecting tabs...";
+      collectStatus.textContent = "Collecting tabs...";
 
         const apiKey = await new Promise<string | undefined>((resolve) => {
           chrome.storage.local.get(["openaiKey"], (data) => {
@@ -101,14 +114,14 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         if (!apiKey) {
-          status.textContent = "❌ Please enter your OpenAI API key first.";
+          collectStatus.textContent = "❌ Please enter your OpenAI API key first.";
           return;
         }
 
     const token = await getToken();
 
     if (!token) {
-      status.textContent = "❌ Please login first.";
+      collectStatus.textContent = "❌ Please login first.";
       return;
     }
 
@@ -170,17 +183,17 @@ document.addEventListener("DOMContentLoaded", () => {
               progressFill.style.width = "0%";
               progressText.textContent = "";
 
-              status.textContent = j.message;
+              collectStatus.textContent = j.message;
 
               return;
           }
 
           if (!j.ok) {
-              status.textContent = j.error || "❌ Error during processing.";
+              collectStatus.textContent = j.error || "❌ Error during processing.";
               return;
           }
 
-          status.textContent = "✅ Ingest done. Closing tabs...";
+          collectStatus.textContent = "✅ Ingest done. Closing tabs...";
           const newTab = await chrome.tabs.create({
               url: "about:blank",
               active: false,
@@ -198,11 +211,11 @@ document.addEventListener("DOMContentLoaded", () => {
               )
           );
 
-          status.textContent = "✅ Tabs collected & closed.";
+          collectStatus.textContent = "✅ Tabs collected & closed.";
 
         } catch (e) {
           console.error("❌ Fetch error:", e);
-          status.textContent = "❌ Error connecting to server.";
+          collectStatus.textContent = "❌ Error connecting to server.";
         }
     });
 
@@ -234,5 +247,109 @@ document.addEventListener("DOMContentLoaded", () => {
 
     chrome.tabs.sendMessage(tab.id, { action: "openChatWidget" });
     status.textContent = "✅ Chat widget opened.";
+  });
+
+  async function loadTabs(reset = false) {
+    if (loading || !hasMore) return;
+
+    loading = true;
+
+    const token = await getToken();
+
+    const res = await fetch(
+      `${SERVER}/tabs?limit=${limit}&offset=${offset}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    const data = await res.json();
+
+    if (!data.ok) return;
+
+    if (reset) {
+      tabsList.innerHTML = "";
+      allTabs = [];
+      offset = 0;
+    }
+
+    allTabs = [...allTabs, ...data.tabs];
+    renderTabs(allTabs);
+
+    offset += limit;
+    hasMore = data.hasMore;
+
+    loading = false;
+
+    renderLoadMore();
+  }
+
+  function renderTabs(tabs: { title: string; url: string }[]) {
+    tabsList.innerHTML = "";
+
+    tabs.forEach((tab) => {
+      const div = document.createElement("div");
+      div.className = "tab-item";
+
+      const shortUrl =
+        tab.url.length > 40
+          ? tab.url.slice(0, 40) + "..."
+          : tab.url;
+
+      div.innerHTML = `
+        <div class="tab-title">${tab.title}</div>
+        <div class="tab-url" title="${tab.url}">
+          ${shortUrl}
+        </div>
+      `;
+
+      div.addEventListener("click", () => {
+        chrome.tabs.create({ url: tab.url });
+      });
+
+      tabsList.appendChild(div);
+    });
+  }
+
+  tabsSearch.addEventListener("input", (e) => {
+    const q = (e.target as HTMLInputElement).value.toLowerCase();
+
+    const filtered = allTabs.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        t.url.toLowerCase().includes(q)
+    );
+
+    renderTabs(filtered);
+  });
+
+  myTabsBtn.addEventListener("click", async () => {
+    if (tabsContainer.style.display === "none") {
+      tabsContainer.style.display = "block";
+      await loadTabs();
+    } else {
+      tabsContainer.style.display = "none";
+    }
+  });
+
+  function renderLoadMore() {
+    if (hasMore) {
+      loadMoreBtn.style.display = "block";
+    } else {
+      loadMoreBtn.style.display = "none";
+    }
+  }
+
+  loadMoreBtn.addEventListener("click", () => {
+    loadTabs();
+  });
+
+  myTabsBtn.addEventListener("click", async () => {
+    tabsContainer.style.display = "block";
+    offset = 0;
+    hasMore = true;
+    await loadTabs(true);
   });
 });

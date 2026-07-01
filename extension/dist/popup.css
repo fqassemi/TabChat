@@ -22,3 +22,38 @@
   color: #444;
   font-weight: 500;
 }
+
+
+
+#tabsContainer {
+  margin-top: 10px;
+}
+
+#tabsSearch {
+  width: 100%;
+  padding: 6px;
+  margin-bottom: 8px;
+}
+
+.tab-item {
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+}
+
+.tab-title {
+  font-weight: bold;
+  font-size: 13px;
+}
+
+
+.tab-url {
+  font-size: 11px;
+  color: gray;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  max-width: 100%;
+}
