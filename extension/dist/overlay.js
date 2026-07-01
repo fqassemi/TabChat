@@ -154,17 +154,22 @@ function openSearchOverlay() {
             return;
         }
         try {
-            const storage = await chrome.storage.local.get(["userId"]);
-            const userId = storage.userId;
+            const storage = await chrome.storage.local.get(["token", "openaiKey",]);
+            const token = storage.token;
+            if (!token) {
+                resultsDiv.innerHTML =
+                    "<div style='color:red;'>❌ Please login first.</div>";
+                return;
+            }
             const r = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/search", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     q,
                     apiKey,
-                    userId,
                 }),
             });
             const j = await r.json();

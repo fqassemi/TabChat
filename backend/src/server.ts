@@ -4,12 +4,18 @@ import fetch from "node-fetch";
 import express from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
+import crypto from "crypto";
 import { OpenAIEmbeddings, ChatOpenAI } from "@langchain/openai";
 import { FaissSearchEngine } from "./vectorstores/FaissSearchEngine.ts";
+
+import { pool } from "./db.ts";
+import { createToken, verifyToken } from "./auth/middleware.ts";
+import { getUserByEmail, createUser } from "./repositories/users.ts";
 
 const app = express();
 
 const FAISS_PATH = "./data/faiss";
+const ingestProgress = new Map<string, { processed: number; total: number; done: boolean }>();
 
 // ------------------ ENV ------------------
 const FIRECRAWL_API = "https://api.firecrawl.dev/v2/scrape";
@@ -25,24 +31,113 @@ faissEngine = new FaissSearchEngine(FAISS_PATH);
 app.use(cors({ origin: "*" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 
+// ------------------ GOOGLE LOGIN ------------------
+app.get("/auth/google/login", (req, res) => {
+  const redirect_uri = req.query.redirect_uri as string;
 
-function normalizeUrl(url?: string) {
-  return (url || "")
-    .split("?")[0]
-    .replace(/\/$/, "")
-    .replace(/^https?:\/\/(www\.)?/, "")
-    .toLowerCase();
+  const url =
+    "https://accounts.google.com/o/oauth2/v2/auth?" +
+    new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID!,
+      redirect_uri: process.env.GOOGLE_REDIRECT_URI!,
+      response_type: "code",
+      scope: "openid email profile",
+      access_type: "offline",
+      prompt: "consent",
+      state: redirect_uri, // مهم 👈 نگه داشتن redirect extension
+    });
+
+  res.redirect(url);
+});
+
+// ------------------ GOOGLE CALLBACK ------------------
+app.get("/auth/google/callback", async (req, res) => {
+  const code = req.query.code as string;
+  const redirect_uri = req.query.state as string;
+
+  if (!code) return res.status(400).send("No code");
+
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: process.env.GOOGLE_CLIENT_ID!,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+      redirect_uri: process.env.GOOGLE_REDIRECT_URI!,
+      grant_type: "authorization_code",
+    }),
+  });
+
+  const tokenData: any = await tokenRes.json();
+
+  const userRes = await fetch(
+    "https://www.googleapis.com/oauth2/v2/userinfo",
+    {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+      },
+    }
+  );
+
+  const userInfo: any = await userRes.json();
+
+  let user = await getUserByEmail(userInfo.email);
+
+  if (!user) {
+    const id = crypto.randomUUID();
+    await createUser(id, userInfo.email, userInfo.name, userInfo.picture);
+    user = { id, email: userInfo.email };
+  }
+
+  const jwt = createToken(user.id);
+
+  try {
+    await pool.query(
+      `
+      INSERT INTO sessions (id, user_id, token, expires_at)
+      VALUES ($1, $2, $3, NOW() + interval '30 days')
+      `,
+      [crypto.randomUUID(), user.id, jwt]
+    );
+
+    console.log("✅ session created");
+  } catch (err) {
+    console.error("❌ session insert failed:", err);
+  }
+
+  // 👇 این مهم‌ترین بخشه
+  return res.redirect(`${redirect_uri}#token=${jwt}`);
+});
+
+// ------------------ AUTH MIDDLEWARE ------------------
+function requireAuth(req: any, res: any, next: any) {
+  try {
+    const auth = req.headers.authorization;
+    const token = auth?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ error: "No token" });
+    }
+
+    const payload = verifyToken(token);
+    req.userId = payload.userId;
+
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
 }
 
 // ------------------ Ingest ------------------
-app.post("/ingest", async (req, res) => {
-  const { docs, apiKey, userId } = req.body;
+app.post("/ingest", requireAuth, async (req: any, res) => {
+  const { docs, apiKey } = req.body;
+  const userId = req.userId;
 
   if (!apiKey || !apiKey.startsWith("sk-"))
     return res.status(400).json({ ok: false, error: "❌ Missing or invalid OpenAI API key" });
 
-  if (!userId)
-    return res.status(400).json({ ok: false, error: "Missing userId" });
+
 
   if (!Array.isArray(docs) || !docs.length)
     return res.status(400).json({ ok: false, error: "❌ Invalid or empty docs array." });
@@ -58,10 +153,18 @@ app.post("/ingest", async (req, res) => {
     });
 
     if (uniqueDocs.length === 0)
-      return res.json({ ok: true, message: "⚠️ All tabs already exist." });
+      return res.json({ ok: true, skipped: true, message: "⚠️ All tabs already exist." });
 
     const allDocsToSave: { text: string; metadata: any; embedding?: number[] }[] = [];
     let countTabs = 0;
+
+    ingestProgress.set(userId, {
+      processed: 0,
+      total: uniqueDocs.length,
+      done: false,
+    });
+
+    let processed = 0;
 
     for (const doc of uniqueDocs) {
       try {
@@ -125,6 +228,13 @@ app.post("/ingest", async (req, res) => {
             embedding: embeddings[i],
           })
         );
+        processed++;
+        countTabs = processed;
+        ingestProgress.set(userId, {
+          processed,
+          total: uniqueDocs.length,
+          done: false,
+        });
       } catch (err) {
         console.error(`❌ Firecrawl error for ${doc.url}:`, err);
       }
@@ -140,6 +250,19 @@ app.post("/ingest", async (req, res) => {
       userId,
       uniqueDocs.map((d) => d.url)
     );
+    await faissEngine.saveTabs(
+      userId,
+      uniqueDocs.map((d) => ({
+        title: d.title || "Untitled",
+        url: d.url,
+      }))
+    );
+
+    ingestProgress.set(userId, {
+          processed: uniqueDocs.length,
+          total: uniqueDocs.length,
+          done: true,
+    });
 
     res.json({
       ok: true,
@@ -153,9 +276,62 @@ app.post("/ingest", async (req, res) => {
   }
 });
 
+
+app.get("/ingest-status", requireAuth, (req: any, res) => {
+  const userId = req.userId;
+
+  const state = ingestProgress.get(userId);
+
+  if (!state) {
+    return res.json({
+      processed: 0,
+      total: 0,
+      done: true,
+    });
+  }
+
+  res.json(state);
+});
+
+
+// ------------------ Get Tabs ------------------
+app.get("/tabs", requireAuth, async (req: any, res) => {
+  const userId = req.userId;
+
+  const limit = parseInt(req.query.limit || "5");
+  const offset = parseInt(req.query.offset || "0");
+
+  try {
+    if (!faissEngine) {
+      faissEngine = new FaissSearchEngine(FAISS_PATH);
+    }
+
+    const tabs = await faissEngine.getTabs(userId);
+
+    const paginated = tabs.slice(offset, offset + limit);
+
+    res.json({
+      ok: true,
+      total: tabs.length,
+      limit,
+      offset,
+      tabs: paginated,
+      hasMore: offset + limit < tabs.length,
+    });
+  } catch (err: any) {
+    console.error("❌ Get tabs error:", err);
+
+    res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
+  }
+});
+
 // ------------------ Chat ------------------
-app.post("/chat", async (req, res) => {
-  const { question, apiKey, url, userId } = req.body;
+app.post("/chat", requireAuth, async (req: any, res) => {
+  const { question, apiKey, url } = req.body;
+  const userId = req.userId;
 
   if (!question?.trim()) {
     return res.status(400).json({ answer: "Question required." });
@@ -171,60 +347,27 @@ app.post("/chat", async (req, res) => {
       faissEngine = new FaissSearchEngine(FAISS_PATH);
     }
 
-    const allResults = await faissEngine.search(
+    const topResults = await faissEngine.search(
       question,
       apiKey,
       userId,
-      10
+      10,
+      url
     );
 
-
-    // ---------------- URL normalizer ----------------
-    const normalizeUrl = (input?: string) => {
-      if (!input) return "";
-      return input
-        .split("?")[0]
-        .replace(/\/$/, "")
-        .replace(/^https?:\/\/(www\.)?/, "")
-        .toLowerCase();
-    };
-
-    // ---------------- Filter by tab ----------------
-    let filteredResults = allResults;
-
-    if (url && typeof url === "string") {
-      const targetUrl = normalizeUrl(url);
-
-      filteredResults = allResults.filter((r) => {
-        const rUrl = r.metadata?.url;
-        return rUrl && normalizeUrl(rUrl) === targetUrl;
+    if (!topResults.length) {
+      return res.json({
+        answer:
+          "I couldn't find any indexed content for this page. Please collect this page first.",
       });
     }
 
-    // fallback
-    if (!filteredResults.length) {
-      filteredResults = allResults;
-    }
-
-    // =================================================
-    // 🔥 FIX #1: limit results (VERY IMPORTANT)
-    // =================================================
-    const topResults = filteredResults
-      .sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
-      .slice(0, 4);
-
-    // =================================================
-    // 🔥 FIX #2: limit each chunk size
-    // =================================================
     const MAX_CHUNK_SIZE = 1200;
 
     const context = topResults
       .map((r) => (r.text || "").slice(0, MAX_CHUNK_SIZE))
       .join("\n\n");
 
-    // =================================================
-    // 🔥 FIX #3: hard stop if still too big
-    // =================================================
     const MAX_CONTEXT_SIZE = 6000;
 
     const safeContext =
@@ -267,8 +410,9 @@ app.post("/chat", async (req, res) => {
 
 
 // ------------------ Search ------------------
-app.post("/search", async (req, res) => {
-  const { q, apiKey, userId } = req.body;
+app.post("/search", requireAuth, async (req, res) => {
+  const { q, apiKey } = req.body;
+  const userId = req.userId;
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
   if (!apiKey || !apiKey.startsWith("sk-"))
     return res.status(400).json({ ok: false, error: "Missing or invalid OpenAI API key" });

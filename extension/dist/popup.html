@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Tab RAG</title>
   <script src="popup.js" defer></script>
+  <link rel="stylesheet" href="popup.css">
   <style>
     body {
       font-family: sans-serif;
@@ -27,6 +28,7 @@
 </head>
 <body>
 <h1>TabChat</h1>
+  <button id="loginBtn">Login with Google</button>
 
   <h3>LLM Configuration</h3>
   <label>OpenAI API Key:</label>
@@ -36,12 +38,31 @@
 
   <hr />
 
-  <button id="collect">Collecting Tabs</button>
-  <button id="openOverlay">Open search in tabs</button>
-  <button id="chatBtn">Open Chat for This Tab</button>
+  <button id="collect">Collects Tabs</button>
+    <div id="collectStatus"></div>
+  <div class="progress-container">
+    <div id="progressFill" class="progress-fill"></div>
+  </div>
+
+  <div id="progressText" class="progress-text">
+    0%
+  </div>
+  <hr />
+  <button id="openOverlay">Search Tabs</button>
+  <button id="chatBtn">Chat with this tab</button>
 
   <div id="status"></div>
-  <hr>
+
   <div id="results"></div>
+  <hr>
+  <button id="myTabsBtn">My Tabs</button>
+
+  <div id="tabsContainer" style="display:none;">
+    <input id="tabsSearch" placeholder="Search tabs..." />
+    <div id="tabsList"></div>
+  </div>
+  <button id="loadMoreBtn" style="display:none;">
+    Load more...
+  </button>
 </body>
 </html>

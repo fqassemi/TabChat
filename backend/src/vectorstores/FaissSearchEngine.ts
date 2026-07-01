@@ -179,11 +179,74 @@ export class FaissSearchEngine {
       );
     }
 
+    private getTabsPath(userId: string) {
+      return path.join(this.basePath, `${userId}-tabs.json`);
+    }
+
+    async saveTabs(
+      userId: string,
+      tabs: {
+        title: string;
+        url: string;
+      }[]
+    ) {
+      const file = this.getTabsPath(userId);
+
+      let existing: {
+        title: string;
+        url: string;
+      }[] = [];
+
+      if (fs.existsSync(file)) {
+        existing = JSON.parse(fs.readFileSync(file, "utf8"));
+      }
+
+      const map = new Map(
+        existing.map((t) => [t.url, t])
+      );
+
+      for (const tab of tabs) {
+        map.set(tab.url, tab);
+      }
+
+      fs.writeFileSync(
+        file,
+        JSON.stringify(
+          [...map.values()],
+          null,
+          2
+        )
+      );
+    }
+
+    async getTabs(userId: string) {
+      const file = this.getTabsPath(userId);
+
+      if (!fs.existsSync(file)) {
+        return [];
+      }
+
+      return JSON.parse(
+        fs.readFileSync(file, "utf8")
+      );
+    }
+
+    private normalizeUrl(input?: string) {
+      if (!input) return "";
+
+      return input
+        .split("?")[0]
+        .replace(/\/$/, "")
+        .replace(/^https?:\/\/(www\.)?/, "")
+        .toLowerCase();
+    }
+
   async search(
     query: string,
     apiKey: string,
     userId: string,
-    k = 5
+    k = 5,
+    url?: string
   ) {
     await this.init(apiKey, userId);
 
@@ -198,7 +261,7 @@ export class FaissSearchEngine {
     try {
       const results = await store.similaritySearchWithScore(
         query,
-        k
+        k * 5
       );
 
       if (!results.length) {
@@ -206,7 +269,7 @@ export class FaissSearchEngine {
           return [];
       }
 
-        return results
+      let docs = results
         .filter(
             ([doc]) =>
             doc.pageContent !== "init" &&
@@ -222,6 +285,18 @@ export class FaissSearchEngine {
             },
             score,
         }));
+
+      // Optional URL filter
+      if (url) {
+        const target = this.normalizeUrl(url);
+
+        docs = docs.filter((d) => {
+            return this.normalizeUrl(d.metadata.url) === target;
+        });
+      }
+
+      return docs;
+
     } catch (err) {
       console.error(
         "❌ FAISS search failed:",

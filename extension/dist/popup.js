@@ -1,36 +1,36 @@
 "use strict";
 // popup.ts
 const SERVER = "https://katelynn-nonsegmented-melvina.ngrok-free.dev";
-function getOrCreateUserId() {
-    return new Promise((resolve) => {
-        chrome.storage.local.get(["userId"], (data) => {
-            const existingUserId = data.userId;
-            if (existingUserId) {
-                resolve(existingUserId);
-                return;
-            }
-            const userId = crypto.randomUUID();
-            chrome.storage.local.set({ userId }, () => {
-                resolve(userId);
-            });
-        });
-    });
-}
 document.addEventListener("DOMContentLoaded", () => {
     const collect = document.getElementById("collect");
     const chatBtn = document.getElementById("chatBtn");
     const openOverlayBtn = document.getElementById("openOverlay");
     const status = document.getElementById("status");
+    const collectStatus = document.getElementById("collectStatus");
     const openaiKeyInput = document.getElementById("openaiKey");
     const saveApiKeyBtn = document.getElementById("saveApiKey");
     const apiKeyStatus = document.getElementById("apiKeyStatus");
+    const loginBtn = document.getElementById("loginBtn");
+    const progressText = document.getElementById("progressText");
+    const progressFill = document.getElementById("progressFill");
+    const myTabsBtn = document.getElementById("myTabsBtn");
+    const tabsContainer = document.getElementById("tabsContainer");
+    const tabsList = document.getElementById("tabsList");
+    const tabsSearch = document.getElementById("tabsSearch");
+    const loadMoreBtn = document.getElementById("loadMoreBtn");
+    let allTabs = [];
+    let offset = 0;
+    const limit = 5;
+    let loading = false;
+    let hasMore = true;
     console.log("Popup loaded ✅");
-    // Load saved settings
+    // ------------------ LOAD API KEY ------------------
     chrome.storage.local.get(["openaiKey"], (data) => {
-        if (data.openaiKey)
+        if (data.openaiKey) {
             openaiKeyInput.value = "********";
+        }
     });
-    // Save API Key
+    // ------------------ SAVE API KEY ------------------
     saveApiKeyBtn.addEventListener("click", () => {
         const key = openaiKeyInput.value.trim();
         if (!key.startsWith("sk-")) {
@@ -41,55 +41,130 @@ document.addEventListener("DOMContentLoaded", () => {
             apiKeyStatus.textContent = "✅ API key saved locally.";
         });
     });
-    // Collect tabs
-    collect.addEventListener("click", async () => {
-        status.textContent = "Collecting tabs...";
-        chrome.storage.local.get(["openaiKey"], async (data) => {
-            const apiKey = data.openaiKey;
-            if (!apiKey) {
-                status.textContent = "❌ Please enter your OpenAI API key first.";
+    // ------------------ LOGIN (FIXED FLOW) ------------------
+    loginBtn.addEventListener("click", async () => {
+        const redirectURL = chrome.identity.getRedirectURL("auth");
+        const authURL = `${SERVER}/auth/google/login` +
+            `?redirect_uri=${encodeURIComponent(redirectURL)}`;
+        chrome.identity.launchWebAuthFlow({
+            url: authURL,
+            interactive: true,
+        }, (result) => {
+            if (!result) {
+                console.error("No auth result");
                 return;
             }
-            const tabs = await new Promise((res) => chrome.tabs.query({}, res));
-            const docs = tabs
-                .filter((t) => t.url?.startsWith("http"))
-                .map((t) => ({
-                title: t.title || "",
-                url: t.url,
-            }));
-            try {
-                const userId = await getOrCreateUserId();
-                const r = await fetch(`${SERVER}/ingest`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        docs,
-                        apiKey,
-                        userId,
-                    }),
+            // 🔥 مهم: چون server تو redirect می‌کنه با #token=
+            const url = new URL(result);
+            const hash = url.hash; // "#token=..."
+            const token = hash.split("token=")[1];
+            if (token) {
+                chrome.storage.local.set({ token }, () => {
+                    console.log("✅ Login success");
+                    status.textContent = "✅Logged in successfully";
                 });
-                const j = await r.json();
-                if (!j.ok) {
-                    status.textContent =
-                        j.error || "❌ Error during processing.";
-                }
-                else if (j.message) {
-                    status.textContent = j.message;
-                }
-                else if (typeof j.count === "number") {
-                    status.textContent = `✅ ${j.count} tabs saved.`;
-                }
-                else {
-                    status.textContent = "✅ Operation completed successfully.";
-                }
             }
-            catch (e) {
-                console.error("❌ Fetch error:", e);
-                status.textContent = "❌ Error connecting to server.";
+            else {
+                console.error("❌Token not found in redirect");
             }
         });
+    });
+    // ------------------ GET TOKEN ------------------
+    function getToken() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get(["token"], (data) => {
+                resolve(data.token ?? null);
+            });
+        });
+    }
+    // Collect tabs
+    collect.addEventListener("click", async () => {
+        collectStatus.textContent = "Collecting tabs...";
+        const apiKey = await new Promise((resolve) => {
+            chrome.storage.local.get(["openaiKey"], (data) => {
+                const typed = data;
+                resolve(typed.openaiKey);
+            });
+        });
+        if (!apiKey) {
+            collectStatus.textContent = "❌ Please enter your OpenAI API key first.";
+            return;
+        }
+        const token = await getToken();
+        if (!token) {
+            collectStatus.textContent = "❌ Please login first.";
+            return;
+        }
+        const tabs = await new Promise((res) => chrome.tabs.query({}, res));
+        const docs = tabs
+            .filter((t) => t.url?.startsWith("http"))
+            .map((t) => ({
+            title: t.title || "",
+            url: t.url,
+            id: t.id,
+        }));
+        try {
+            progressText.textContent = "0%";
+            progressFill.style.width = "0%";
+            const ingestPromise = fetch(`${SERVER}/ingest`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    docs,
+                    apiKey,
+                }),
+            });
+            const interval = setInterval(async () => {
+                const res = await fetch(`${SERVER}/ingest-status`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+                const data = await res.json();
+                const percent = data.total
+                    ? Math.floor((data.processed / data.total) * 100)
+                    : 0;
+                progressFill.style.width = `${percent}%`;
+                progressText.textContent = `${percent}%`;
+                if (data.done) {
+                    clearInterval(interval);
+                    progressFill.style.width = "100%";
+                    progressText.textContent = `✅ ${data.processed}/${data.total} Tabs`;
+                }
+            }, 500);
+            const j = await (await ingestPromise).json();
+            if (j.skipped) {
+                clearInterval(interval);
+                progressFill.style.width = "0%";
+                progressText.textContent = "";
+                collectStatus.textContent = j.message;
+                return;
+            }
+            if (!j.ok) {
+                collectStatus.textContent = j.error || "❌ Error during processing.";
+                return;
+            }
+            collectStatus.textContent = "✅ Ingest done. Closing tabs...";
+            const newTab = await chrome.tabs.create({
+                url: "about:blank",
+                active: false,
+            });
+            await chrome.notifications.create({
+                type: "basic",
+                iconUrl: "https://www.google.com/favicon.ico",
+                title: "TabChat",
+                message: "Tabs collected & processed ✅",
+            });
+            await Promise.all(docs.map((doc) => doc.id ? chrome.tabs.remove(doc.id) : Promise.resolve()));
+            collectStatus.textContent = "✅ Tabs collected & closed.";
+        }
+        catch (e) {
+            console.error("❌ Fetch error:", e);
+            collectStatus.textContent = "❌ Error connecting to server.";
+        }
     });
     // Open overlay
     openOverlayBtn.addEventListener("click", async () => {
@@ -115,6 +190,83 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         chrome.tabs.sendMessage(tab.id, { action: "openChatWidget" });
         status.textContent = "✅ Chat widget opened.";
+    });
+    async function loadTabs(reset = false) {
+        if (loading || !hasMore)
+            return;
+        loading = true;
+        const token = await getToken();
+        const res = await fetch(`${SERVER}/tabs?limit=${limit}&offset=${offset}`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        });
+        const data = await res.json();
+        if (!data.ok)
+            return;
+        if (reset) {
+            tabsList.innerHTML = "";
+            allTabs = [];
+            offset = 0;
+        }
+        allTabs = [...allTabs, ...data.tabs];
+        renderTabs(allTabs);
+        offset += limit;
+        hasMore = data.hasMore;
+        loading = false;
+        renderLoadMore();
+    }
+    function renderTabs(tabs) {
+        tabsList.innerHTML = "";
+        tabs.forEach((tab) => {
+            const div = document.createElement("div");
+            div.className = "tab-item";
+            const shortUrl = tab.url.length > 40
+                ? tab.url.slice(0, 40) + "..."
+                : tab.url;
+            div.innerHTML = `
+        <div class="tab-title">${tab.title}</div>
+        <div class="tab-url" title="${tab.url}">
+          ${shortUrl}
+        </div>
+      `;
+            div.addEventListener("click", () => {
+                chrome.tabs.create({ url: tab.url });
+            });
+            tabsList.appendChild(div);
+        });
+    }
+    tabsSearch.addEventListener("input", (e) => {
+        const q = e.target.value.toLowerCase();
+        const filtered = allTabs.filter((t) => t.title.toLowerCase().includes(q) ||
+            t.url.toLowerCase().includes(q));
+        renderTabs(filtered);
+    });
+    myTabsBtn.addEventListener("click", async () => {
+        if (tabsContainer.style.display === "none") {
+            tabsContainer.style.display = "block";
+            await loadTabs();
+        }
+        else {
+            tabsContainer.style.display = "none";
+        }
+    });
+    function renderLoadMore() {
+        if (hasMore) {
+            loadMoreBtn.style.display = "block";
+        }
+        else {
+            loadMoreBtn.style.display = "none";
+        }
+    }
+    loadMoreBtn.addEventListener("click", () => {
+        loadTabs();
+    });
+    myTabsBtn.addEventListener("click", async () => {
+        tabsContainer.style.display = "block";
+        offset = 0;
+        hasMore = true;
+        await loadTabs(true);
     });
 });
 //# sourceMappingURL=popup.js.map
