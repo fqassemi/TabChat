@@ -15,6 +15,7 @@ import { getUserByEmail, createUser } from "./repositories/users.ts";
 const app = express();
 
 const FAISS_PATH = "./data/faiss";
+const ingestProgress = new Map<string, { processed: number; total: number; done: boolean }>();
 
 // ------------------ ENV ------------------
 const FIRECRAWL_API = "https://api.firecrawl.dev/v2/scrape";
@@ -157,6 +158,14 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
     const allDocsToSave: { text: string; metadata: any; embedding?: number[] }[] = [];
     let countTabs = 0;
 
+    ingestProgress.set(userId, {
+      processed: 0,
+      total: uniqueDocs.length,
+      done: false,
+    });
+
+    let processed = 0;
+
     for (const doc of uniqueDocs) {
       try {
         const payload = {
@@ -219,6 +228,13 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
             embedding: embeddings[i],
           })
         );
+        processed++;
+        countTabs = processed;
+        ingestProgress.set(userId, {
+          processed,
+          total: uniqueDocs.length,
+          done: false,
+        });
       } catch (err) {
         console.error(`❌ Firecrawl error for ${doc.url}:`, err);
       }
@@ -234,6 +250,11 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
       userId,
       uniqueDocs.map((d) => d.url)
     );
+    ingestProgress.set(userId, {
+          processed: uniqueDocs.length,
+          total: uniqueDocs.length,
+          done: true,
+    });
 
     res.json({
       ok: true,
@@ -245,6 +266,23 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
     console.error("❌ Ingest error:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+
+app.get("/ingest-status", requireAuth, (req: any, res) => {
+  const userId = req.userId;
+
+  const state = ingestProgress.get(userId);
+
+  if (!state) {
+    return res.json({
+      processed: 0,
+      total: 0,
+      done: true,
+    });
+  }
+
+  res.json(state);
 });
 
 // ------------------ Chat ------------------
