@@ -153,7 +153,7 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
     });
 
     if (uniqueDocs.length === 0)
-      return res.json({ ok: true, message: "⚠️ All tabs already exist." });
+      return res.json({ ok: true, skipped: true, message: "⚠️ All tabs already exist." });
 
     const allDocsToSave: { text: string; metadata: any; embedding?: number[] }[] = [];
     let countTabs = 0;
