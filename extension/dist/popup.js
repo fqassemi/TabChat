@@ -1,6 +1,6 @@
 "use strict";
 // popup.ts
-const SERVER = "http://127.0.0.1:8000";
+const SERVER = "https://katelynn-nonsegmented-melvina.ngrok-free.dev";
 document.addEventListener("DOMContentLoaded", () => {
     const collect = document.getElementById("collect");
     const chatBtn = document.getElementById("chatBtn");
@@ -48,11 +48,11 @@ document.addEventListener("DOMContentLoaded", () => {
             if (token) {
                 chrome.storage.local.set({ token }, () => {
                     console.log("✅ Login success");
-                    status.textContent = "Logged in successfully";
+                    status.textContent = "✅Logged in successfully";
                 });
             }
             else {
-                console.error("Token not found in redirect");
+                console.error("❌Token not found in redirect");
             }
         });
     });
@@ -103,7 +103,8 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             const j = await r.json();
             if (!j.ok) {
-                status.textContent = j.error || "❌ Error during processing.";
+                status.textContent =
+                    j.error || "❌ Error during processing.";
             }
             else {
                 status.textContent = j.message || "✅ Done";

@@ -120,7 +120,7 @@
                     addMessage("❌ Please login first.", false);
                     return;
                 }
-                const response = await fetch("http://127.0.0.1:8000/chat", {
+                const response = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/chat", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",

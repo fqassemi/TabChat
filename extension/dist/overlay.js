@@ -161,7 +161,7 @@ function openSearchOverlay() {
                     "<div style='color:red;'>❌ Please login first.</div>";
                 return;
             }
-            const r = await fetch("http://127.0.0.1:8000/search", {
+            const r = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/search", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
