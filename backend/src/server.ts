@@ -266,60 +266,27 @@ app.post("/chat", requireAuth, async (req: any, res) => {
       faissEngine = new FaissSearchEngine(FAISS_PATH);
     }
 
-    const allResults = await faissEngine.search(
+    const topResults = await faissEngine.search(
       question,
       apiKey,
       userId,
-      10
+      10,
+      url
     );
 
-
-    // ---------------- URL normalizer ----------------
-    const normalizeUrl = (input?: string) => {
-      if (!input) return "";
-      return input
-        .split("?")[0]
-        .replace(/\/$/, "")
-        .replace(/^https?:\/\/(www\.)?/, "")
-        .toLowerCase();
-    };
-
-    // ---------------- Filter by tab ----------------
-    let filteredResults = allResults;
-
-    if (url && typeof url === "string") {
-      const targetUrl = normalizeUrl(url);
-
-      filteredResults = allResults.filter((r) => {
-        const rUrl = r.metadata?.url;
-        return rUrl && normalizeUrl(rUrl) === targetUrl;
+    if (!topResults.length) {
+      return res.json({
+        answer:
+          "I couldn't find any indexed content for this page. Please collect this page first.",
       });
     }
 
-    // fallback
-    if (!filteredResults.length) {
-      filteredResults = allResults;
-    }
-
-    // =================================================
-    // 🔥 FIX #1: limit results (VERY IMPORTANT)
-    // =================================================
-    const topResults = filteredResults
-      .sort((a, b) => (a.score ?? 0) - (b.score ?? 0))
-      .slice(0, 4);
-
-    // =================================================
-    // 🔥 FIX #2: limit each chunk size
-    // =================================================
     const MAX_CHUNK_SIZE = 1200;
 
     const context = topResults
       .map((r) => (r.text || "").slice(0, MAX_CHUNK_SIZE))
       .join("\n\n");
 
-    // =================================================
-    // 🔥 FIX #3: hard stop if still too big
-    // =================================================
     const MAX_CONTEXT_SIZE = 6000;
 
     const safeContext =
