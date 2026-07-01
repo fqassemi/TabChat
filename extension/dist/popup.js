@@ -88,6 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
             .map((t) => ({
             title: t.title || "",
             url: t.url,
+            id: t.id,
         }));
         try {
             const r = await fetch(`${SERVER}/ingest`, {
@@ -103,12 +104,22 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             const j = await r.json();
             if (!j.ok) {
-                status.textContent =
-                    j.error || "❌ Error during processing.";
+                status.textContent = j.error || "❌ Error during processing.";
+                return;
             }
-            else {
-                status.textContent = j.message || "✅ Done";
-            }
+            status.textContent = "✅ Ingest done. Closing tabs...";
+            const newTab = await chrome.tabs.create({
+                url: "about:blank",
+                active: false,
+            });
+            await chrome.notifications.create({
+                type: "basic",
+                iconUrl: "https://www.google.com/favicon.ico",
+                title: "TabChat",
+                message: "Tabs collected & processed ✅",
+            });
+            await Promise.all(docs.map((doc) => doc.id ? chrome.tabs.remove(doc.id) : Promise.resolve()));
+            status.textContent = "✅ Tabs collected & closed.";
         }
         catch (e) {
             console.error("❌ Fetch error:", e);
