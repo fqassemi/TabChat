@@ -22,6 +22,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const progressText = document.getElementById("progressText") as HTMLDivElement;
   const progressFill = document.getElementById("progressFill") as HTMLDivElement;
+  const closeTabsContainer = document.getElementById("closeTabsContainer") as HTMLDivElement;
+  const closeTabStatus = document.getElementById("closeTabStatus") as HTMLDivElement;
 
   const myTabsBtn = document.getElementById("myTabsBtn") as HTMLButtonElement;
   const tabsContainer = document.getElementById("tabsContainer") as HTMLDivElement;
@@ -193,11 +195,7 @@ document.addEventListener("DOMContentLoaded", () => {
               return;
           }
 
-          collectStatus.textContent = "✅ Ingest done. Closing tabs...";
-          const newTab = await chrome.tabs.create({
-              url: "about:blank",
-              active: false,
-          });
+          collectStatus.textContent = "✅ collection done.";
           await chrome.notifications.create({
               type: "basic",
               iconUrl: "https://www.google.com/favicon.ico",
@@ -205,13 +203,7 @@ document.addEventListener("DOMContentLoaded", () => {
               message: "Tabs collected & processed ✅",
           });
 
-          await Promise.all(
-              docs.map((doc) =>
-                doc.id ? chrome.tabs.remove(doc.id) : Promise.resolve()
-              )
-          );
-
-          collectStatus.textContent = "✅ Tabs collected & closed.";
+          renderCloseTabsPrompt(docs);
 
         } catch (e) {
           console.error("❌ Fetch error:", e);
@@ -284,6 +276,93 @@ document.addEventListener("DOMContentLoaded", () => {
     loading = false;
 
     renderLoadMore();
+  }
+
+
+  function renderCloseTabsPrompt(docs: { title: string; url: string; id?: number }[]) {
+    const closable = docs.filter((d) => d.id);
+
+    closeTabsContainer.style.display = "block";
+    closeTabsContainer.innerHTML = `
+      <hr />
+      <div style="font-weight:bold; margin-bottom:6px;">
+        Which tabs should be closed? (Default: None selected)
+      </div>
+      <div style="margin-bottom:6px; display:flex; gap:6px;">
+        <button id="selectAllBtn" type="button">Select All</button>
+        <button id="selectNoneBtn" type="button">Select None</button>
+      </div>
+      <div id="closeTabsList" style="max-height:200px; overflow-y:auto; border:1px solid #ddd; padding:4px;"></div>
+      <button id="confirmCloseBtn" style="margin-top:8px;">Close checked tabs</button>
+      <button id="cancelCloseBtn" style="margin-top:4px;">Don't close anything for now.</button>
+    `;
+
+    const listDiv = document.getElementById("closeTabsList") as HTMLDivElement;
+
+    closable.forEach((doc) => {
+      const row = document.createElement("label");
+      Object.assign(row.style, {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "4px 0",
+        fontSize: "12px",
+        borderBottom: "1px solid #eee",
+      });
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.tabId = String(doc.id);
+      checkbox.checked = false; // پیش‌فرض: هیچی بسته نشه
+
+      const text = document.createElement("span");
+      text.textContent = `${doc.title || "Untitled"} — ${doc.url}`;
+      text.style.overflow = "hidden";
+      text.style.textOverflow = "ellipsis";
+      text.style.whiteSpace = "nowrap";
+
+      row.appendChild(checkbox);
+      row.appendChild(text);
+      listDiv.appendChild(row);
+    });
+
+    document.getElementById("selectAllBtn")!.addEventListener("click", () => {
+      listDiv.querySelectorAll<HTMLInputElement>("input[type=checkbox]")
+        .forEach((cb) => (cb.checked = true));
+    });
+
+    document.getElementById("selectNoneBtn")!.addEventListener("click", () => {
+      listDiv.querySelectorAll<HTMLInputElement>("input[type=checkbox]")
+        .forEach((cb) => (cb.checked = false));
+    });
+
+    document.getElementById("cancelCloseBtn")!.addEventListener("click", () => {
+      closeTabsContainer.style.display = "none";
+      closeTabsContainer.innerHTML = "";
+      closeTabStatus.textContent = "✅ Tabs saved (nothing closed).";
+    });
+
+    document.getElementById("confirmCloseBtn")!.addEventListener("click", async () => {
+      const checked = Array.from(
+        listDiv.querySelectorAll<HTMLInputElement>("input[type=checkbox]:checked")
+      );
+      const idsToClose = checked
+        .map((cb) => Number(cb.dataset.tabId))
+        .filter((id) => !Number.isNaN(id));
+
+      if (idsToClose.length === 0) {
+        closeTabStatus.textContent = "No tab was selected to close.";
+        return;
+      }
+
+      await Promise.all(
+        idsToClose.map((id) => chrome.tabs.remove(id).catch(() => {}))
+      );
+
+      closeTabStatus.textContent = `✅ ${idsToClose.length} closed`;
+      closeTabsContainer.style.display = "none";
+      closeTabsContainer.innerHTML = "";
+    });
   }
 
   function renderTabs(tabs: { title: string; url: string }[]) {
