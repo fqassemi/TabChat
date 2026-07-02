@@ -219,6 +219,35 @@ export class FaissSearchEngine {
       );
     }
 
+    async deleteTab(userId: string, url: string) {
+        const file = this.getTabsPath(userId);
+
+        if (!fs.existsSync(file)) return;
+
+        const tabs = JSON.parse(fs.readFileSync(file, "utf8"));
+
+        const filtered = tabs.filter(
+            (t: any) => this.normalizeUrl(t.url) !== this.normalizeUrl(url)
+        );
+
+        fs.writeFileSync(file, JSON.stringify(filtered, null, 2));
+    }
+
+
+    async deleteUrl(userId: string, url: string) {
+        const file = this.getMetadataPath(userId);
+
+        if (!fs.existsSync(file)) return;
+
+        const json = JSON.parse(fs.readFileSync(file, "utf8"));
+
+        json.urls = (json.urls || []).filter(
+            (u: string) => this.normalizeUrl(u) !== this.normalizeUrl(url)
+        );
+
+        fs.writeFileSync(file, JSON.stringify(json, null, 2));
+    }
+
     async getTabs(userId: string) {
       const file = this.getTabsPath(userId);
 
@@ -229,6 +258,40 @@ export class FaissSearchEngine {
       return JSON.parse(
         fs.readFileSync(file, "utf8")
       );
+    }
+
+    async deleteByUrl(
+      userId: string,
+      apiKey: string,
+      url: string
+    ) {
+      await this.init(apiKey, userId);
+
+      const store = this.stores.get(userId);
+
+      if (!store) {
+        throw new Error("Store not initialized");
+      }
+
+      const docstore = store.getDocstore();
+
+      const target = this.normalizeUrl(url);
+
+      const ids: string[] = [];
+
+      for (const [id, doc] of docstore._docs.entries()) {
+        if (this.normalizeUrl(doc.metadata?.url) === target) {
+          ids.push(id);
+        }
+      }
+
+      console.log(`Deleting ${ids.length} vectors`);
+
+      if (ids.length === 0) return;
+
+      await store.delete({ ids });
+
+      await store.save(this.getUserPath(userId));
     }
 
     private normalizeUrl(input?: string) {
