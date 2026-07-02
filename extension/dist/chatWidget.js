@@ -4,6 +4,9 @@
     if (window.chatWidgetInjected)
         return;
     window.chatWidgetInjected = true;
+    function isRTL(text) {
+        return /[\u0600-\u06FF]/.test(text);
+    }
     async function injectChatWidget() {
         const apiKey = await new Promise((resolve) => chrome.storage.local.get(["openaiKey"], (data) => {
             const key = data.openaiKey;
@@ -15,6 +18,34 @@
         }
         if (document.getElementById("chat-widget"))
             return;
+        // ===== STYLE (THEME SYSTEM) =====
+        const style = document.createElement("style");
+        style.textContent = `
+      #chat-widget {
+        --bg: #ffffff;
+        --text: #111111;
+        --border: #ddd;
+        --user-msg: #DCF8C6;
+        --bot-msg: #F1F0F0;
+        --input-bg: #ffffff;
+        --header-bg: #007bff;
+      }
+
+      #chat-widget.dark {
+        --bg: #1e1e1e;
+        --text: #f5f5f5;
+        --border: #333;
+        --user-msg: #2e7d32;
+        --bot-msg: #2a2a2a;
+        --input-bg: #2b2b2b;
+        --header-bg: #0d6efd;
+      }
+
+      #chat-widget input {
+        outline: none;
+      }
+    `;
+        document.head.appendChild(style);
         const chatDiv = document.createElement("div");
         chatDiv.id = "chat-widget";
         Object.assign(chatDiv.style, {
@@ -23,8 +54,9 @@
             right: "20px",
             width: "300px",
             height: "400px",
-            backgroundColor: "white",
-            border: "1px solid #ccc",
+            backgroundColor: "var(--bg)",
+            color: "var(--text)",
+            border: "1px solid var(--border)",
             borderRadius: "8px",
             boxShadow: "0 0 10px rgba(0,0,0,0.2)",
             zIndex: "99999",
@@ -33,10 +65,23 @@
             overflow: "hidden",
             fontFamily: "sans-serif",
         });
-        // Header
+        // ===== DARK MODE DETECTION =====
+        if (window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches) {
+            chatDiv.classList.add("dark");
+        }
+        window
+            .matchMedia("(prefers-color-scheme: dark)")
+            .addEventListener("change", (e) => {
+            if (e.matches)
+                chatDiv.classList.add("dark");
+            else
+                chatDiv.classList.remove("dark");
+        });
+        // ===== HEADER =====
         const header = document.createElement("div");
         Object.assign(header.style, {
-            backgroundColor: "#007bff",
+            backgroundColor: "var(--header-bg)",
             color: "white",
             padding: "8px",
             display: "flex",
@@ -54,9 +99,7 @@
             border: "none",
             cursor: "pointer",
             fontSize: "16px",
-            lineHeight: "1",
         });
-        closeBtn.title = "Close chat";
         closeBtn.addEventListener("click", () => {
             chatDiv.remove();
             window.chatWidgetInjected = false;
@@ -64,25 +107,52 @@
         header.appendChild(title);
         header.appendChild(closeBtn);
         chatDiv.appendChild(header);
+        // ===== MESSAGES =====
         const messages = document.createElement("div");
         Object.assign(messages.style, {
             flex: "1",
             padding: "8px",
             overflowY: "auto",
+            backgroundColor: "var(--bg)",
+            color: "var(--text)",
         });
         chatDiv.appendChild(messages);
+        function addMessage(text, fromUser = true) {
+            const msg = document.createElement("div");
+            const rtl = isRTL(text);
+            const dir = rtl ? "rtl" : "ltr";
+            msg.textContent = text;
+            Object.assign(msg.style, {
+                margin: "4px 0",
+                backgroundColor: fromUser ? "var(--user-msg)" : "var(--bot-msg)",
+                color: "#000",
+                padding: "6px 10px",
+                borderRadius: "6px",
+                maxWidth: "90%",
+                alignSelf: fromUser ? "flex-end" : "flex-start",
+                direction: dir,
+                textAlign: dir === "rtl" ? "right" : "left",
+            });
+            messages.appendChild(msg);
+            messages.scrollTop = messages.scrollHeight;
+        }
+        // ===== INPUT =====
         const inputDiv = document.createElement("div");
         Object.assign(inputDiv.style, {
             display: "flex",
-            borderTop: "1px solid #ccc",
+            borderTop: "1px solid var(--border)",
+            backgroundColor: "var(--bg)",
         });
         const input = document.createElement("input");
         input.type = "text";
-        input.style.flex = "1";
-        input.style.border = "none";
-        input.style.padding = "8px";
         input.placeholder = "Ask something...";
-        inputDiv.appendChild(input);
+        Object.assign(input.style, {
+            flex: "1",
+            border: "none",
+            padding: "8px",
+            backgroundColor: "var(--input-bg)",
+            color: "var(--text)",
+        });
         const sendBtn = document.createElement("button");
         sendBtn.textContent = "Send";
         Object.assign(sendBtn.style, {
@@ -90,23 +160,13 @@
             backgroundColor: "#007bff",
             color: "white",
             padding: "8px 12px",
+            cursor: "pointer",
         });
+        inputDiv.appendChild(input);
         inputDiv.appendChild(sendBtn);
         chatDiv.appendChild(inputDiv);
         document.body.appendChild(chatDiv);
-        function addMessage(text, fromUser = true) {
-            const msg = document.createElement("div");
-            msg.textContent = text;
-            Object.assign(msg.style, {
-                margin: "4px 0",
-                textAlign: fromUser ? "right" : "left",
-                backgroundColor: fromUser ? "#DCF8C6" : "#F1F0F0",
-                padding: "4px 8px",
-                borderRadius: "4px",
-            });
-            messages.appendChild(msg);
-            messages.scrollTop = messages.scrollHeight;
-        }
+        // ===== SEND LOGIC =====
         async function sendQuestion() {
             const question = input.value.trim();
             if (!question)
@@ -114,7 +174,10 @@
             addMessage(question, true);
             input.value = "";
             try {
-                const storage = await chrome.storage.local.get(["token", "openaiKey",]);
+                const storage = await chrome.storage.local.get([
+                    "token",
+                    "openaiKey",
+                ]);
                 const token = storage.token;
                 if (!token) {
                     addMessage("❌ Please login first.", false);
