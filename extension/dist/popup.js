@@ -225,13 +225,45 @@ document.addEventListener("DOMContentLoaded", () => {
                 ? tab.url.slice(0, 40) + "..."
                 : tab.url;
             div.innerHTML = `
+      <div class="tab-content">
         <div class="tab-title">${tab.title}</div>
         <div class="tab-url" title="${tab.url}">
           ${shortUrl}
         </div>
+      </div>
+
+      <button class="delete-btn">🗑</button>
       `;
             div.addEventListener("click", () => {
                 chrome.tabs.create({ url: tab.url });
+            });
+            const deleteBtn = div.querySelector(".delete-btn");
+            deleteBtn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                if (!confirm("Delete this tab?")) {
+                    return;
+                }
+                const token = await getToken();
+                const { openaiKey } = await chrome.storage.local.get(["openaiKey"]);
+                const res = await fetch(`${SERVER}/tabs`, {
+                    method: "DELETE",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        url: tab.url,
+                        apiKey: openaiKey,
+                    }),
+                });
+                const data = await res.json();
+                if (!data.ok) {
+                    alert(data.error || "Delete failed");
+                    return;
+                }
+                // حذف از لیست فعلی
+                allTabs = allTabs.filter((t) => t.url !== tab.url);
+                renderTabs(allTabs);
             });
             tabsList.appendChild(div);
         });
@@ -241,15 +273,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const filtered = allTabs.filter((t) => t.title.toLowerCase().includes(q) ||
             t.url.toLowerCase().includes(q));
         renderTabs(filtered);
-    });
-    myTabsBtn.addEventListener("click", async () => {
-        if (tabsContainer.style.display === "none") {
-            tabsContainer.style.display = "block";
-            await loadTabs();
-        }
-        else {
-            tabsContainer.style.display = "none";
-        }
     });
     function renderLoadMore() {
         if (hasMore) {
@@ -263,10 +286,15 @@ document.addEventListener("DOMContentLoaded", () => {
         loadTabs();
     });
     myTabsBtn.addEventListener("click", async () => {
-        tabsContainer.style.display = "block";
-        offset = 0;
-        hasMore = true;
-        await loadTabs(true);
+        if (tabsContainer.style.display === "none") {
+            tabsContainer.style.display = "block";
+            offset = 0;
+            hasMore = true;
+            await loadTabs(true);
+        }
+        else {
+            tabsContainer.style.display = "none";
+        }
     });
 });
 //# sourceMappingURL=popup.js.map
