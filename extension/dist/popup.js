@@ -1,6 +1,24 @@
 "use strict";
 // popup.ts
 const SERVER = "https://katelynn-nonsegmented-melvina.ngrok-free.dev";
+const EXCLUDED_DOMAINS = [
+    "mail.google.com", // Gmail
+    "claude.ai", // Claude
+    "chat.openai.com", // ChatGPT
+    "chatgpt.com", // ChatGPT (دامنه جدید)
+    "gemini.google.com", // Gemini
+    "web.whatsapp.com", // WhatsApp Web
+    "chrome://", // صفحات داخلی کروم
+];
+function isExcludedUrl(url) {
+    try {
+        const hostname = new URL(url).hostname;
+        return EXCLUDED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+    }
+    catch {
+        return true;
+    }
+}
 document.addEventListener("DOMContentLoaded", () => {
     const collect = document.getElementById("collect");
     const chatBtn = document.getElementById("chatBtn");
@@ -100,6 +118,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const tabs = await new Promise((res) => chrome.tabs.query({}, res));
         const docs = tabs
             .filter((t) => t.url?.startsWith("http"))
+            .filter((t) => !isExcludedUrl(t.url))
             .map((t) => ({
             title: t.title || "",
             url: t.url,
