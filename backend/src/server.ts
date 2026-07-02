@@ -328,6 +328,47 @@ app.get("/tabs", requireAuth, async (req: any, res) => {
   }
 });
 
+
+// ------------------ Delete Tab ------------------
+app.delete("/tabs", requireAuth, async (req: any, res) => {
+  const { url, apiKey } = req.body;
+  const userId = req.userId;
+
+  if (!url) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing url",
+    });
+  }
+
+  if (!apiKey || !apiKey.startsWith("sk-")) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing OpenAI API key",
+    });
+  }
+
+  try {
+    await faissEngine.deleteByUrl(userId, apiKey, url);
+
+    await faissEngine.deleteTab(userId, url);
+
+    await faissEngine.deleteUrl(userId, url);
+
+    res.json({
+      ok: true,
+      message: "Tab deleted successfully.",
+    });
+  } catch (err: any) {
+    console.error("Delete tab error:", err);
+
+    res.status(500).json({
+      ok: false,
+      error: err.message,
+    });
+  }
+});
+
 // ------------------ Chat ------------------
 app.post("/chat", requireAuth, async (req: any, res) => {
   const { question, apiKey, url } = req.body;

@@ -1,6 +1,24 @@
 "use strict";
 // popup.ts
 const SERVER = "https://katelynn-nonsegmented-melvina.ngrok-free.dev";
+const EXCLUDED_DOMAINS = [
+    "mail.google.com", // Gmail
+    "claude.ai", // Claude
+    "chat.openai.com", // ChatGPT
+    "chatgpt.com", // ChatGPT (دامنه جدید)
+    "gemini.google.com", // Gemini
+    "web.whatsapp.com", // WhatsApp Web
+    "chrome://", // صفحات داخلی کروم
+];
+function isExcludedUrl(url) {
+    try {
+        const hostname = new URL(url).hostname;
+        return EXCLUDED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+    }
+    catch {
+        return true;
+    }
+}
 document.addEventListener("DOMContentLoaded", () => {
     const collect = document.getElementById("collect");
     const chatBtn = document.getElementById("chatBtn");
@@ -13,6 +31,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const loginBtn = document.getElementById("loginBtn");
     const progressText = document.getElementById("progressText");
     const progressFill = document.getElementById("progressFill");
+    const closeTabsContainer = document.getElementById("closeTabsContainer");
+    const closeTabStatus = document.getElementById("closeTabStatus");
     const myTabsBtn = document.getElementById("myTabsBtn");
     const tabsContainer = document.getElementById("tabsContainer");
     const tabsList = document.getElementById("tabsList");
@@ -98,6 +118,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const tabs = await new Promise((res) => chrome.tabs.query({}, res));
         const docs = tabs
             .filter((t) => t.url?.startsWith("http"))
+            .filter((t) => !isExcludedUrl(t.url))
             .map((t) => ({
             title: t.title || "",
             url: t.url,
@@ -147,19 +168,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 collectStatus.textContent = j.error || "❌ Error during processing.";
                 return;
             }
-            collectStatus.textContent = "✅ Ingest done. Closing tabs...";
-            const newTab = await chrome.tabs.create({
-                url: "about:blank",
-                active: false,
-            });
+            collectStatus.textContent = "✅ collection done.";
             await chrome.notifications.create({
                 type: "basic",
                 iconUrl: "https://www.google.com/favicon.ico",
                 title: "TabChat",
                 message: "Tabs collected & processed ✅",
             });
-            await Promise.all(docs.map((doc) => doc.id ? chrome.tabs.remove(doc.id) : Promise.resolve()));
-            collectStatus.textContent = "✅ Tabs collected & closed.";
+            renderCloseTabsPrompt(docs);
         }
         catch (e) {
             console.error("❌ Fetch error:", e);
@@ -216,6 +232,74 @@ document.addEventListener("DOMContentLoaded", () => {
         loading = false;
         renderLoadMore();
     }
+    function renderCloseTabsPrompt(docs) {
+        const closable = docs.filter((d) => d.id);
+        closeTabsContainer.style.display = "block";
+        closeTabsContainer.innerHTML = `
+      <hr />
+      <div style="font-weight:bold; margin-bottom:6px;">
+        Which tabs should be closed? (Default: None selected)
+      </div>
+      <div style="margin-bottom:6px; display:flex; gap:6px;">
+        <button id="selectAllBtn" type="button">Select All</button>
+        <button id="selectNoneBtn" type="button">Select None</button>
+      </div>
+      <div id="closeTabsList" style="max-height:200px; overflow-y:auto; border:1px solid #ddd; padding:4px;"></div>
+      <button id="confirmCloseBtn" style="margin-top:8px;">Close checked tabs</button>
+      <button id="cancelCloseBtn" style="margin-top:4px;">Don't close anything for now.</button>
+    `;
+        const listDiv = document.getElementById("closeTabsList");
+        closable.forEach((doc) => {
+            const row = document.createElement("label");
+            Object.assign(row.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 0",
+                fontSize: "12px",
+                borderBottom: "1px solid #eee",
+            });
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.dataset.tabId = String(doc.id);
+            checkbox.checked = false; // پیش‌فرض: هیچی بسته نشه
+            const text = document.createElement("span");
+            text.textContent = `${doc.title || "Untitled"} — ${doc.url}`;
+            text.style.overflow = "hidden";
+            text.style.textOverflow = "ellipsis";
+            text.style.whiteSpace = "nowrap";
+            row.appendChild(checkbox);
+            row.appendChild(text);
+            listDiv.appendChild(row);
+        });
+        document.getElementById("selectAllBtn").addEventListener("click", () => {
+            listDiv.querySelectorAll("input[type=checkbox]")
+                .forEach((cb) => (cb.checked = true));
+        });
+        document.getElementById("selectNoneBtn").addEventListener("click", () => {
+            listDiv.querySelectorAll("input[type=checkbox]")
+                .forEach((cb) => (cb.checked = false));
+        });
+        document.getElementById("cancelCloseBtn").addEventListener("click", () => {
+            closeTabsContainer.style.display = "none";
+            closeTabsContainer.innerHTML = "";
+            closeTabStatus.textContent = "✅ Tabs saved (nothing closed).";
+        });
+        document.getElementById("confirmCloseBtn").addEventListener("click", async () => {
+            const checked = Array.from(listDiv.querySelectorAll("input[type=checkbox]:checked"));
+            const idsToClose = checked
+                .map((cb) => Number(cb.dataset.tabId))
+                .filter((id) => !Number.isNaN(id));
+            if (idsToClose.length === 0) {
+                closeTabStatus.textContent = "No tab was selected to close.";
+                return;
+            }
+            await Promise.all(idsToClose.map((id) => chrome.tabs.remove(id).catch(() => { })));
+            closeTabStatus.textContent = `✅ ${idsToClose.length} closed`;
+            closeTabsContainer.style.display = "none";
+            closeTabsContainer.innerHTML = "";
+        });
+    }
     function renderTabs(tabs) {
         tabsList.innerHTML = "";
         tabs.forEach((tab) => {
@@ -225,13 +309,45 @@ document.addEventListener("DOMContentLoaded", () => {
                 ? tab.url.slice(0, 40) + "..."
                 : tab.url;
             div.innerHTML = `
+      <div class="tab-content">
         <div class="tab-title">${tab.title}</div>
         <div class="tab-url" title="${tab.url}">
           ${shortUrl}
         </div>
+      </div>
+
+      <button class="delete-btn">🗑</button>
       `;
             div.addEventListener("click", () => {
                 chrome.tabs.create({ url: tab.url });
+            });
+            const deleteBtn = div.querySelector(".delete-btn");
+            deleteBtn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                if (!confirm("Delete this tab?")) {
+                    return;
+                }
+                const token = await getToken();
+                const { openaiKey } = await chrome.storage.local.get(["openaiKey"]);
+                const res = await fetch(`${SERVER}/tabs`, {
+                    method: "DELETE",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        url: tab.url,
+                        apiKey: openaiKey,
+                    }),
+                });
+                const data = await res.json();
+                if (!data.ok) {
+                    alert(data.error || "Delete failed");
+                    return;
+                }
+                // حذف از لیست فعلی
+                allTabs = allTabs.filter((t) => t.url !== tab.url);
+                renderTabs(allTabs);
             });
             tabsList.appendChild(div);
         });
@@ -241,15 +357,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const filtered = allTabs.filter((t) => t.title.toLowerCase().includes(q) ||
             t.url.toLowerCase().includes(q));
         renderTabs(filtered);
-    });
-    myTabsBtn.addEventListener("click", async () => {
-        if (tabsContainer.style.display === "none") {
-            tabsContainer.style.display = "block";
-            await loadTabs();
-        }
-        else {
-            tabsContainer.style.display = "none";
-        }
     });
     function renderLoadMore() {
         if (hasMore) {
@@ -263,10 +370,15 @@ document.addEventListener("DOMContentLoaded", () => {
         loadTabs();
     });
     myTabsBtn.addEventListener("click", async () => {
-        tabsContainer.style.display = "block";
-        offset = 0;
-        hasMore = true;
-        await loadTabs(true);
+        if (tabsContainer.style.display === "none") {
+            tabsContainer.style.display = "block";
+            offset = 0;
+            hasMore = true;
+            await loadTabs(true);
+        }
+        else {
+            tabsContainer.style.display = "none";
+        }
     });
 });
 //# sourceMappingURL=popup.js.map

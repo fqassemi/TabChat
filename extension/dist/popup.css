@@ -35,11 +35,6 @@
   margin-bottom: 8px;
 }
 
-.tab-item {
-  padding: 8px;
-  border-bottom: 1px solid #eee;
-  cursor: pointer;
-}
 
 .tab-title {
   font-weight: bold;
@@ -56,4 +51,37 @@
   text-overflow: ellipsis;
 
   max-width: 100%;
+}
+
+
+.tab-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    padding: 8px;
+    margin-bottom: 8px;
+
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.tab-content {
+    flex: 1;
+    cursor: pointer;
+}
+
+.delete-btn {
+    width: 30px;
+    height: 30px;
+
+    border: none;
+    background: transparent;
+
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.delete-btn:hover {
+    color: red;
 }
