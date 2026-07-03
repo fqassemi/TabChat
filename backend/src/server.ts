@@ -382,13 +382,13 @@ app.post("/chat", requireAuth, async (req: any, res) => {
     return res.status(400).json({ answer: "Invalid API key" });
   }
 
-
+  let topResults: any[] = [];
   try {
     if (!faissEngine) {
       faissEngine = new FaissSearchEngine(FAISS_PATH);
     }
 
-    const topResults = await faissEngine.search(
+    topResults = await faissEngine.search(
       question,
       apiKey,
       userId,
