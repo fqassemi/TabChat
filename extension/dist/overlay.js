@@ -161,7 +161,7 @@ function openSearchOverlay() {
                     "<div style='color:red;'>❌ Please login first.</div>";
                 return;
             }
-            const r = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/search", {
+            const r = await fetch("https://tabchat-production-f7d0.up.railway.app/search", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

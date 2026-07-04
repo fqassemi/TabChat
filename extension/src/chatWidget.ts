@@ -212,7 +212,7 @@
           return;
         }
 
-        const response = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/chat", {
+        const response = await fetch("https://tabchat-production-f7d0.up.railway.app//chat", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

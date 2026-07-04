@@ -1,5 +1,5 @@
 // popup.ts
-const SERVER = "https://katelynn-nonsegmented-melvina.ngrok-free.dev";
+const SERVER = "https://tabchat-production-f7d0.up.railway.app";
 
 const EXCLUDED_DOMAINS = [
   "mail.google.com",       // Gmail
