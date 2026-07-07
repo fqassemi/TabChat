@@ -38,6 +38,61 @@
 
   <hr />
 
+
+<h3>Storage</h3>
+
+<label>Storage Type</label>
+
+<select id="storageType">
+
+    <option value="local">
+        Default
+    </option>
+
+    <option value="scp">
+        My Server (SCP)
+    </option>
+
+</select>
+
+<div id="scpSettings" style="display:none;">
+
+    <label>Host</label>
+
+    <input
+        id="scpHost"
+        placeholder="192.168.1.10"
+    >
+
+    <label>Username</label>
+
+    <input
+        id="scpUsername"
+    >
+
+    <label>Password</label>
+
+    <input
+        id="scpPassword"
+        type="password"
+    >
+
+    <label>Remote Path</label>
+
+    <input
+        id="scpRemotePath"
+        placeholder="/home/user/tabchat"
+    >
+
+</div>
+
+<button id="saveStorage">
+    Save Storage
+</button>
+
+<div id="storageStatus"></div>
+<hr>
+
   <button id="collect">Collects Tabs</button>
     <div id="collectStatus"></div>
   <div class="progress-container">

@@ -1,6 +1,6 @@
 "use strict";
 // popup.ts
-const SERVER = "https://katelynn-nonsegmented-melvina.ngrok-free.dev";
+const SERVER = "https://tabchat-production-f7d0.up.railway.app";
 const EXCLUDED_DOMAINS = [
     "mail.google.com", // Gmail
     "claude.ai", // Claude
@@ -43,6 +43,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const limit = 5;
     let loading = false;
     let hasMore = true;
+    const storageType = document.getElementById("storageType");
+    const scpSettings = document.getElementById("scpSettings");
+    const scpHost = document.getElementById("scpHost");
+    const scpUsername = document.getElementById("scpUsername");
+    const scpPassword = document.getElementById("scpPassword");
+    const scpRemotePath = document.getElementById("scpRemotePath");
+    const saveStorage = document.getElementById("saveStorage");
+    const storageStatus = document.getElementById("storageStatus");
     console.log("Popup loaded ✅");
     // ------------------ LOAD API KEY ------------------
     chrome.storage.local.get(["openaiKey"], (data) => {
@@ -53,6 +61,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // ------------------ SAVE API KEY ------------------
     saveApiKeyBtn.addEventListener("click", () => {
         const key = openaiKeyInput.value.trim();
+        if (!key) {
+            chrome.storage.local.remove("openaiKey", () => {
+                apiKeyStatus.textContent =
+                    "✅ Using default server API key.";
+            });
+            return;
+        }
         if (!key.startsWith("sk-")) {
             apiKeyStatus.textContent = "❌ Invalid API key format.";
             return;
@@ -97,6 +112,45 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         });
     }
+    storageType.addEventListener("change", () => {
+        if (storageType.value === "scp") {
+            scpSettings.style.display = "block";
+        }
+        else {
+            scpSettings.style.display = "none";
+        }
+    });
+    saveStorage.addEventListener("click", async () => {
+        const token = await getToken();
+        if (!token) {
+            storageStatus.textContent =
+                "Please login.";
+            return;
+        }
+        const res = await fetch(`${SERVER}/storage/config`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                type: storageType.value,
+                host: scpHost.value,
+                username: scpUsername.value,
+                password: scpPassword.value,
+                remote_path: scpRemotePath.value
+            })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            storageStatus.textContent =
+                "Saved.";
+        }
+        else {
+            storageStatus.textContent =
+                data.error;
+        }
+    });
     // Collect tabs
     collect.addEventListener("click", async () => {
         collectStatus.textContent = "Collecting tabs...";
@@ -106,10 +160,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 resolve(typed.openaiKey);
             });
         });
-        if (!apiKey) {
-            collectStatus.textContent = "❌ Please enter your OpenAI API key first.";
-            return;
-        }
         const token = await getToken();
         if (!token) {
             collectStatus.textContent = "❌ Please login first.";
@@ -212,6 +262,7 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         loading = true;
         const token = await getToken();
+        const { openaiKey } = (await chrome.storage.local.get(["openaiKey"]));
         const res = await fetch(`${SERVER}/tabs?limit=${limit}&offset=${offset}`, {
             headers: {
                 Authorization: `Bearer ${token}`,
@@ -337,7 +388,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     },
                     body: JSON.stringify({
                         url: tab.url,
-                        apiKey: openaiKey,
+                        apiKey: openaiKey || undefined,
                     }),
                 });
                 const data = await res.json();

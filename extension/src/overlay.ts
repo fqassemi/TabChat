@@ -159,10 +159,7 @@ function openSearchOverlay(): void {
 
     const data = await chrome.storage.local.get(["openaiKey"]);
     const apiKey = data.openaiKey as string | undefined;
-    if (!apiKey) {
-      resultsDiv.innerHTML = "<div style='color:red;'>❌ API key is not set</div>";
-      return;
-    }
+
 
     try {
   const storage = await chrome.storage.local.get(["token", "openaiKey",]);
@@ -174,7 +171,7 @@ function openSearchOverlay(): void {
       return;
   }
 
-  const r = await fetch("https://katelynn-nonsegmented-melvina.ngrok-free.dev/search", {
+  const r = await fetch("https://tabchat-production-f7d0.up.railway.app/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -2,18 +2,37 @@ import fs from "fs";
 import path from "path";
 import { FaissStore } from "@langchain/community/vectorstores/faiss";
 import { OpenAIEmbeddings } from "@langchain/openai";
+import type { StorageProvider } from "../storage/StorageProvider.ts";
 
 export class FaissSearchEngine {
   private basePath: string;
   private stores: Map<string, FaissStore> = new Map();
   private embedder: OpenAIEmbeddings | null = null;
+  private initPromises: Map<string, Promise<void>> = new Map();
+  private storage?: StorageProvider;
 
-  constructor(basePath = "./data/faiss") {
-    this.basePath = basePath;
+  constructor(
+    basePath="./data/faiss",
+    storage?: StorageProvider
+  ){
+    this.basePath=basePath;
+    this.storage = storage;
   }
 
-  private getUserPath(userId: string): string {
-    return path.join(this.basePath, userId);
+  private async getUserPath(userId:string){
+
+    if(this.storage){
+
+        return await this.storage.getLocalPath(userId);
+
+    }
+
+
+    return path.join(
+        this.basePath,
+        userId
+    );
+
   }
 
   async init(apiKey: string, userId: string) {
@@ -25,11 +44,36 @@ export class FaissSearchEngine {
       this.embedder = new OpenAIEmbeddings({ apiKey });
     }
 
-    if (this.stores.has(userId)) {
+    const isTemp = this.storage?.isTemporary?.() ?? false;
+
+    if (!isTemp && this.stores.has(userId)) {
       return;
     }
 
-    const userPath = this.getUserPath(userId);
+    // اگه یک init دیگه همین الان برای همین userId در حال اجراست،
+    // به‌جای شروع دوباره‌ی دانلود، فقط منتظر همون بمون
+    const existing = this.initPromises.get(userId);
+    if (existing) {
+      return existing;
+    }
+
+    const run = this._doInit(userId, isTemp);
+    this.initPromises.set(userId, run);
+
+    try {
+      await run;
+    } finally {
+      this.initPromises.delete(userId);
+    }
+  }
+
+  private async _doInit(userId: string, isTemp: boolean) {
+    if (isTemp && this.stores.has(userId)) {
+      this.stores.delete(userId);
+    }
+
+    await this.storage?.beforeLoad(userId);
+    const userPath = await this.getUserPath(userId);
 
     if (!fs.existsSync(this.basePath)) {
       fs.mkdirSync(this.basePath, { recursive: true });
@@ -39,45 +83,33 @@ export class FaissSearchEngine {
       if (fs.existsSync(userPath)) {
         console.log(`📂 Loading FAISS index for user ${userId}`);
 
-        const store = await FaissStore.load(
-          userPath,
-          this.embedder
-        );
+        const store = await FaissStore.load(userPath, this.embedder!);
 
         this.stores.set(userId, store);
 
-        console.log(
-          `✅ FAISS index loaded for user ${userId}`
-        );
+        console.log(`✅ FAISS index loaded for user ${userId}`);
       } else {
-        console.log(
-          `🆕 Creating FAISS index for user ${userId}`
-        );
+        console.log(`🆕 Creating FAISS index for user ${userId}`);
 
         const store = await FaissStore.fromTexts(
           ["init"],
           [{ meta: "init" }],
-          this.embedder
+          this.embedder!
         );
 
         await store.save(userPath);
 
         this.stores.set(userId, store);
 
-        console.log(
-          `✅ New FAISS index created for user ${userId}`
-        );
+        console.log(`✅ New FAISS index created for user ${userId}`);
       }
     } catch (err) {
-      console.error(
-        `❌ Failed loading FAISS for ${userId}`,
-        err
-      );
+      console.error(`❌ Failed loading FAISS for ${userId}`, err);
 
       const store = await FaissStore.fromTexts(
         ["init"],
         [{ meta: "init" }],
-        this.embedder
+        this.embedder!
       );
 
       await store.save(userPath);
@@ -131,8 +163,9 @@ export class FaissSearchEngine {
       store.mergeFrom(newStore);
 
       await store.save(
-        this.getUserPath(userId)
+         await this.getUserPath(userId)
       );
+      await this.storage?.afterSave(userId);
 
       console.log(
         `✅ Synced ${docs.length} chunks into FAISS for user ${userId}`
@@ -144,12 +177,21 @@ export class FaissSearchEngine {
       );
     }
   }
-    private getMetadataPath(userId: string) {
-      return path.join(this.basePath, `${userId}-metadata.json`);
+    private async getMetadataPath(userId:string){
+
+        const base = await this.storage?.getLocalPath(userId)
+            ?? path.join(this.basePath,userId);
+
+
+        return path.join(
+            path.dirname(base),
+            `${userId}-metadata.json`
+        );
+
     }
 
     async getExistingUrls(userId: string): Promise<Set<string>> {
-      const file = this.getMetadataPath(userId);
+      const file = await this.getMetadataPath(userId);
 
       if (!fs.existsSync(file)) {
         return new Set();
@@ -161,7 +203,7 @@ export class FaissSearchEngine {
     }
 
     async saveUrls(userId: string, urls: string[]) {
-      const file = this.getMetadataPath(userId);
+      const file = await this.getMetadataPath(userId);
 
       const existing = await this.getExistingUrls(userId);
 
@@ -179,8 +221,17 @@ export class FaissSearchEngine {
       );
     }
 
-    private getTabsPath(userId: string) {
-      return path.join(this.basePath, `${userId}-tabs.json`);
+    private async getTabsPath(userId:string){
+
+        const base = await this.storage?.getLocalPath(userId)
+            ?? path.join(this.basePath,userId);
+
+
+        return path.join(
+            path.dirname(base),
+            `${userId}-tabs.json`
+        );
+
     }
 
     async saveTabs(
@@ -190,7 +241,7 @@ export class FaissSearchEngine {
         url: string;
       }[]
     ) {
-      const file = this.getTabsPath(userId);
+      const file = await this.getTabsPath(userId);
 
       let existing: {
         title: string;
@@ -220,7 +271,7 @@ export class FaissSearchEngine {
     }
 
     async deleteTab(userId: string, url: string) {
-        const file = this.getTabsPath(userId);
+        const file = await this.getTabsPath(userId);
 
         if (!fs.existsSync(file)) return;
 
@@ -230,26 +281,35 @@ export class FaissSearchEngine {
             (t: any) => this.normalizeUrl(t.url) !== this.normalizeUrl(url)
         );
 
-        fs.writeFileSync(file, JSON.stringify(filtered, null, 2));
+        fs.writeFileSync(
+            file,
+            JSON.stringify(filtered, null, 2)
+        );
     }
 
 
     async deleteUrl(userId: string, url: string) {
-        const file = this.getMetadataPath(userId);
+        const file = await this.getMetadataPath(userId);
 
         if (!fs.existsSync(file)) return;
 
-        const json = JSON.parse(fs.readFileSync(file, "utf8"));
-
-        json.urls = (json.urls || []).filter(
-            (u: string) => this.normalizeUrl(u) !== this.normalizeUrl(url)
+        const json = JSON.parse(
+            fs.readFileSync(file, "utf8")
         );
 
-        fs.writeFileSync(file, JSON.stringify(json, null, 2));
+        json.urls = (json.urls || []).filter(
+            (u: string) =>
+                this.normalizeUrl(u) !== this.normalizeUrl(url)
+        );
+
+        fs.writeFileSync(
+            file,
+            JSON.stringify(json, null, 2)
+        );
     }
 
     async getTabs(userId: string) {
-      const file = this.getTabsPath(userId);
+      const file = await this.getTabsPath(userId);
 
       if (!fs.existsSync(file)) {
         return [];
@@ -291,7 +351,10 @@ export class FaissSearchEngine {
 
       await store.delete({ ids });
 
-      await store.save(this.getUserPath(userId));
+      await store.save(
+          await this.getUserPath(userId)
+      );
+      await this.storage?.afterSave(userId);
     }
 
     private normalizeUrl(input?: string) {
@@ -368,4 +431,18 @@ export class FaissSearchEngine {
       return [];
     }
   }
+async syncStorage(userId:string){
+
+    await this.storage?.afterSave(userId);
+
+}
+
+isTemporary() {
+    return this.storage?.isTemporary?.() ?? false;
+}
+
+async cleanup(userId: string) {
+    this.stores.delete(userId);
+    await this.storage?.cleanup(userId);
+}
 }
