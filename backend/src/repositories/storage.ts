@@ -1,3 +1,4 @@
+import { encrypt, decrypt } from "../utils/crypto.ts";
 import { pool } from "../db.ts";
 
 
@@ -17,7 +18,13 @@ export async function getUserStorage(userId: string) {
         };
     }
 
-    return result.rows[0];
+    const row = result.rows[0];
+
+    if (row.password) {
+      row.password = decrypt(row.password);
+    }
+
+    return row;
 }
 
 
@@ -29,6 +36,11 @@ export async function saveUserStorage(
   password: string | null,
   remotePath: string | null
 ) {
+  const encryptedPassword =
+    password
+      ? encrypt(password)
+      : null;
+
   await pool.query(
     `
     INSERT INTO user_storage
@@ -57,7 +69,7 @@ export async function saveUserStorage(
       type,
       host,
       username,
-      password,
+      encryptedPassword,
       remotePath
     ]
   );
