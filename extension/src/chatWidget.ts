@@ -14,10 +14,7 @@
       })
     );
 
-    if (!apiKey) {
-      alert("❌ Please save your OpenAI API key first.");
-      return;
-    }
+
 
     if (document.getElementById("chat-widget")) return;
 
@@ -212,7 +209,7 @@
           return;
         }
 
-        const response = await fetch("https://tabchat-production-f7d0.up.railway.app//chat", {
+        const response = await fetch("https://tabchat-production-f7d0.up.railway.app/chat", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

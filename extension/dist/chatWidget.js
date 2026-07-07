@@ -12,10 +12,6 @@
             const key = data.openaiKey;
             resolve(typeof key === "string" ? key : "");
         }));
-        if (!apiKey) {
-            alert("❌ Please save your OpenAI API key first.");
-            return;
-        }
         if (document.getElementById("chat-widget"))
             return;
         // ===== STYLE (THEME SYSTEM) =====
@@ -183,7 +179,7 @@
                     addMessage("❌ Please login first.", false);
                     return;
                 }
-                const response = await fetch("https://tabchat-production-f7d0.up.railway.app//chat", {
+                const response = await fetch("https://tabchat-production-f7d0.up.railway.app/chat", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",

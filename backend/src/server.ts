@@ -11,6 +11,10 @@ import { FaissSearchEngine } from "./vectorstores/FaissSearchEngine.ts";
 import { pool } from "./db.ts";
 import { createToken, verifyToken } from "./auth/middleware.ts";
 import { getUserByEmail, createUser } from "./repositories/users.ts";
+import { getStorageProvider } from "./storage/StorageFactory.ts";
+import {
+  saveUserStorage
+} from "./repositories/storage.ts";
 
 const app = express();
 
@@ -20,16 +24,54 @@ const ingestProgress = new Map<string, { processed: number; total: number; done:
 // ------------------ ENV ------------------
 const FIRECRAWL_API = "https://api.firecrawl.dev/v2/scrape";
 const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY!;
+const DEFAULT_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // ------------------ Global State ------------------
-let faissEngine: FaissSearchEngine | null = null;
+const faissEngines = new Map<string, FaissSearchEngine>();
 
-// ------------------ Database Initialization ------------------
-faissEngine = new FaissSearchEngine(FAISS_PATH);
+async function getFaissEngine(userId: string) {
+
+  let engine = faissEngines.get(userId);
+
+
+  if (!engine) {
+
+    const storage = await getStorageProvider(userId);
+    console.log("STORAGE PROVIDER:", storage.constructor.name);
+
+    engine = new FaissSearchEngine(
+      FAISS_PATH,
+      storage
+    );
+
+
+    faissEngines.set(
+      userId,
+      engine
+    );
+  }
+
+
+  return engine;
+}
 
 // ------------------ Middleware ------------------
 app.use(cors({ origin: "*" }));
 app.use(bodyParser.json({ limit: "50mb" }));
+
+
+function resolveApiKey(apiKey?: string) {
+
+  if (apiKey?.startsWith("sk-")) {
+    return apiKey;
+  }
+
+  if (DEFAULT_OPENAI_API_KEY?.startsWith("sk-")) {
+    return DEFAULT_OPENAI_API_KEY;
+  }
+
+  throw new Error("No OpenAI API key configured.");
+}
 
 // ------------------ GOOGLE LOGIN ------------------
 app.get("/auth/google/login", (req, res) => {
@@ -133,19 +175,16 @@ function requireAuth(req: any, res: any, next: any) {
 app.post("/ingest", requireAuth, async (req: any, res) => {
   const { docs, apiKey } = req.body;
   const userId = req.userId;
-
-  if (!apiKey || !apiKey.startsWith("sk-"))
-    return res.status(400).json({ ok: false, error: "❌ Missing or invalid OpenAI API key" });
-
-
+  const key = resolveApiKey(apiKey);
 
   if (!Array.isArray(docs) || !docs.length)
     return res.status(400).json({ ok: false, error: "❌ Invalid or empty docs array." });
 
-  const embedder = new OpenAIEmbeddings({ apiKey });
+  const embedder = new OpenAIEmbeddings({ key });
+  const engine = await getFaissEngine(userId);
 
   try {
-    const existingUrls = await faissEngine.getExistingUrls(userId);
+    const existingUrls = await engine.getExistingUrls(userId);
 
     const uniqueDocs = docs.filter((d) => {
       if (existingUrls.has(d.url)) return false;
@@ -243,20 +282,28 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
     if (!allDocsToSave.length)
       return res.status(400).json({ ok: false, message: "❌ No valid content retrieved." });
 
+    await engine.syncFromDocuments(
+      allDocsToSave,
+      key,
+      userId
+    );
 
-    if (!faissEngine) faissEngine = new FaissSearchEngine(FAISS_PATH);
-    await faissEngine.syncFromDocuments(allDocsToSave, apiKey, userId);
-    await faissEngine.saveUrls(
+
+    await engine.saveUrls(
       userId,
       uniqueDocs.map((d) => d.url)
     );
-    await faissEngine.saveTabs(
+
+
+    await engine.saveTabs(
       userId,
       uniqueDocs.map((d) => ({
         title: d.title || "Untitled",
         url: d.url,
       }))
     );
+
+    await engine.syncStorage(userId);
 
     ingestProgress.set(userId, {
           processed: uniqueDocs.length,
@@ -273,6 +320,10 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
   } catch (err: any) {
     console.error("❌ Ingest error:", err);
     res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    if (engine.isTemporary()) {
+      await engine.cleanup(userId);
+    }
   }
 });
 
@@ -297,16 +348,19 @@ app.get("/ingest-status", requireAuth, (req: any, res) => {
 // ------------------ Get Tabs ------------------
 app.get("/tabs", requireAuth, async (req: any, res) => {
   const userId = req.userId;
+  const apiKey = req.query.apiKey as string;
 
   const limit = parseInt(req.query.limit || "5");
   const offset = parseInt(req.query.offset || "0");
 
-  try {
-    if (!faissEngine) {
-      faissEngine = new FaissSearchEngine(FAISS_PATH);
-    }
+  const key = resolveApiKey(req.query.apiKey as string | undefined);
 
-    const tabs = await faissEngine.getTabs(userId);
+  const engine = await getFaissEngine(userId);
+
+  try {
+    await engine.init(key, userId);
+
+    const tabs = await engine.getTabs(userId);
 
     const paginated = tabs.slice(offset, offset + limit);
 
@@ -320,11 +374,11 @@ app.get("/tabs", requireAuth, async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("❌ Get tabs error:", err);
-
-    res.status(500).json({
-      ok: false,
-      error: err.message,
-    });
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    if (engine.isTemporary()) {
+      await engine.cleanup(userId);
+    }
   }
 });
 
@@ -341,19 +395,25 @@ app.delete("/tabs", requireAuth, async (req: any, res) => {
     });
   }
 
-  if (!apiKey || !apiKey.startsWith("sk-")) {
-    return res.status(400).json({
-      ok: false,
-      error: "Missing OpenAI API key",
-    });
-  }
-
+  const key = resolveApiKey(apiKey);
+  const engine = await getFaissEngine(userId);
   try {
-    await faissEngine.deleteByUrl(userId, apiKey, url);
+    await engine.deleteByUrl(
+      userId,
+      key,
+      url
+    );
 
-    await faissEngine.deleteTab(userId, url);
+    await engine.deleteTab(
+      userId,
+      url
+    );
 
-    await faissEngine.deleteUrl(userId, url);
+    await engine.deleteUrl(
+      userId,
+      url
+    );
+    await engine.syncStorage(userId);
 
     res.json({
       ok: true,
@@ -366,6 +426,10 @@ app.delete("/tabs", requireAuth, async (req: any, res) => {
       ok: false,
       error: err.message,
     });
+  } finally {
+    if (engine.isTemporary()) {
+      await engine.cleanup(userId);
+    }
   }
 });
 
@@ -378,19 +442,14 @@ app.post("/chat", requireAuth, async (req: any, res) => {
     return res.status(400).json({ answer: "Question required." });
   }
 
-  if (!apiKey || !apiKey.startsWith("sk-")) {
-    return res.status(400).json({ answer: "Invalid API key" });
-  }
+  const key = resolveApiKey(apiKey);
 
   let topResults: any[] = [];
+  const engine = await getFaissEngine(userId);
   try {
-    if (!faissEngine) {
-      faissEngine = new FaissSearchEngine(FAISS_PATH);
-    }
-
-    topResults = await faissEngine.search(
+    topResults = await engine.search(
       question,
-      apiKey,
+      key,
       userId,
       10,
       url
@@ -417,7 +476,7 @@ app.post("/chat", requireAuth, async (req: any, res) => {
         : context;
 
     const chatLLM = new ChatOpenAI({
-      apiKey,
+      key,
       temperature: 0,
     });
 
@@ -446,6 +505,10 @@ app.post("/chat", requireAuth, async (req: any, res) => {
     part: r.metadata?.part,
     preview: r.text.slice(0, 150) // ✅ اول ۱۵۰ کاراکتر چانک
   })) });
+  } finally {
+    if (engine.isTemporary()) {
+      await engine.cleanup(userId);
+    }
   }
 });
 
@@ -455,18 +518,13 @@ app.post("/search", requireAuth, async (req, res) => {
   const { q, apiKey } = req.body;
   const userId = req.userId;
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
-  if (!apiKey || !apiKey.startsWith("sk-"))
-    return res.status(400).json({ ok: false, error: "Missing or invalid OpenAI API key" });
+  const key = resolveApiKey(apiKey);
 
+  const engine = await getFaissEngine(userId);
   try {
-    if (!faissEngine) {
-      faissEngine = new FaissSearchEngine(FAISS_PATH);
-      await faissEngine.init(apiKey);
-    }
-
-    const results = await faissEngine.search(
+    const results = await engine.search(
       q,
-      apiKey,
+      key,
       userId,
       5
     );
@@ -488,8 +546,55 @@ app.post("/search", requireAuth, async (req, res) => {
   } catch (err: any) {
     console.error("❌ Search error:", err);
     res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    if (engine.isTemporary()) {
+      await engine.cleanup(userId);
+    }
   }
 });
+
+app.post(
+  "/storage/config",
+  requireAuth,
+  async (req: any, res) => {
+
+    const userId = req.userId;
+
+    const {
+      type,
+      host,
+      username,
+      password,
+      remote_path
+    } = req.body;
+
+    try {
+
+      await saveUserStorage(
+        userId,
+        type,
+        host || null,
+        username || null,
+        password || null,
+        remote_path || null
+      );
+      faissEngines.delete(userId);
+
+      res.json({
+        ok: true
+      });
+
+    } catch (err: any) {
+
+      res.status(500).json({
+        ok: false,
+        error: err.message
+      });
+
+    }
+
+  }
+);
 
 // ------------------ Start ------------------
 const PORT = process.env.PORT || 8000;

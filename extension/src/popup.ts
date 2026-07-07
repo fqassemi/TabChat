@@ -58,6 +58,30 @@ document.addEventListener("DOMContentLoaded", () => {
   let loading = false;
   let hasMore = true;
 
+const storageType =
+document.getElementById("storageType") as HTMLSelectElement;
+
+const scpSettings =
+document.getElementById("scpSettings") as HTMLDivElement;
+
+const scpHost =
+document.getElementById("scpHost") as HTMLInputElement;
+
+const scpUsername =
+document.getElementById("scpUsername") as HTMLInputElement;
+
+const scpPassword =
+document.getElementById("scpPassword") as HTMLInputElement;
+
+const scpRemotePath =
+document.getElementById("scpRemotePath") as HTMLInputElement;
+
+const saveStorage =
+document.getElementById("saveStorage") as HTMLButtonElement;
+
+const storageStatus =
+document.getElementById("storageStatus") as HTMLDivElement;
+
   console.log("Popup loaded ✅");
 
   // ------------------ LOAD API KEY ------------------
@@ -70,6 +94,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // ------------------ SAVE API KEY ------------------
   saveApiKeyBtn.addEventListener("click", () => {
     const key = openaiKeyInput.value.trim();
+    if (!key) {
+      chrome.storage.local.remove("openaiKey", () => {
+        apiKeyStatus.textContent =
+          "✅ Using default server API key.";
+      });
+      return;
+    }
     if (!key.startsWith("sk-")) {
       apiKeyStatus.textContent = "❌ Invalid API key format.";
       return;
@@ -125,6 +156,90 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+storageType.addEventListener(
+  "change",
+  () => {
+
+    if (storageType.value === "scp") {
+
+      scpSettings.style.display = "block";
+
+    } else {
+
+      scpSettings.style.display = "none";
+
+    }
+
+  }
+);
+
+
+saveStorage.addEventListener(
+  "click",
+  async () => {
+
+    const token = await getToken();
+
+    if (!token) {
+
+      storageStatus.textContent =
+      "Please login.";
+
+      return;
+
+    }
+
+    const res = await fetch(
+
+      `${SERVER}/storage/config`,
+
+      {
+
+        method: "POST",
+
+        headers: {
+
+          "Content-Type":"application/json",
+
+          Authorization:`Bearer ${token}`
+
+        },
+
+        body: JSON.stringify({
+
+          type: storageType.value,
+
+          host: scpHost.value,
+
+          username: scpUsername.value,
+
+          password: scpPassword.value,
+
+          remote_path: scpRemotePath.value
+
+        })
+
+      }
+
+    );
+
+    const data = await res.json();
+
+    if(data.ok){
+
+      storageStatus.textContent =
+      "Saved.";
+
+    }else{
+
+      storageStatus.textContent =
+      data.error;
+
+    }
+
+  }
+);
+
   // Collect tabs
     collect.addEventListener("click", async () => {
       collectStatus.textContent = "Collecting tabs...";
@@ -136,10 +251,7 @@ document.addEventListener("DOMContentLoaded", () => {
           });
         });
 
-        if (!apiKey) {
-          collectStatus.textContent = "❌ Please enter your OpenAI API key first.";
-          return;
-        }
+
 
     const token = await getToken();
 
@@ -269,6 +381,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loading = true;
 
     const token = await getToken();
+    const { openaiKey } = (await chrome.storage.local.get(["openaiKey"])) as StorageData;
 
     const res = await fetch(
       `${SERVER}/tabs?limit=${limit}&offset=${offset}`,
@@ -435,7 +548,7 @@ document.addEventListener("DOMContentLoaded", () => {
           },
           body: JSON.stringify({
             url: tab.url,
-            apiKey: openaiKey,
+            apiKey: openaiKey || undefined,
           }),
         });
 
