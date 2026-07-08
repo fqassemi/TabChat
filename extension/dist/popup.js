@@ -251,16 +251,46 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
             if (!j.ok) {
+                clearInterval(interval);
                 collectStatus.textContent = j.error || "❌ Error during processing.";
                 return;
             }
-            collectStatus.textContent = "✅ collection done.";
-            await chrome.notifications.create({
-                type: "basic",
-                iconUrl: "https://www.google.com/favicon.ico",
-                title: "TabChat",
-                message: "Tabs collected & processed ✅",
-            });
+            clearInterval(interval);
+            progressFill.style.width = "100%";
+            collectStatus.textContent = j.message || "✅ Tabs collected. Indexing in background...";
+            // ------------------ فاز دوم: polling برای ایندکس‌شدن ------------------
+            const indexInterval = setInterval(async () => {
+                try {
+                    const idxRes = await fetch(`${SERVER}/index-status`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    });
+                    const idxData = await idxRes.json();
+                    const percent = idxData.total
+                        ? Math.floor((idxData.indexed / idxData.total) * 100)
+                        : 100;
+                    progressFill.style.width = `${percent}%`;
+                    progressText.textContent = idxData.error
+                        ? `❌ ${idxData.error}`
+                        : `Indexing: ${percent}%`;
+                    if (idxData.done) {
+                        clearInterval(indexInterval);
+                        collectStatus.textContent = idxData.error
+                            ? "❌ Indexing failed."
+                            : "✅ Indexing complete. Ready to chat.";
+                        await chrome.notifications.create({
+                            type: "basic",
+                            iconUrl: "https://www.google.com/favicon.ico",
+                            title: "TabChat",
+                            message: idxData.error
+                                ? "Indexing failed ❌"
+                                : "Tabs indexed & ready to chat ✅",
+                        });
+                    }
+                }
+                catch (err) {
+                    console.error("❌ Index status poll failed:", err);
+                }
+            }, 1000);
             renderCloseTabsPrompt(docs);
         }
         catch (e) {

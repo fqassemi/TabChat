@@ -46,6 +46,11 @@ export class ScpStorageProvider implements StorageProvider {
         const local = `${this.tempBase}/${userId}`;
         const metadataLocal = `${this.tempBase}/${userId}-metadata.json`;
         const tabsLocal = `${this.tempBase}/${userId}-tabs.json`;
+        const pendingLocal = `${this.tempBase}/${userId}-pending.json`;
+
+        if (fs.existsSync(pendingLocal)) {
+            fs.rmSync(pendingLocal);
+        }
 
         if (fs.existsSync(local)) {
             fs.rmSync(local, { recursive: true, force: true });
@@ -87,6 +92,12 @@ export class ScpStorageProvider implements StorageProvider {
 
             const tabsRemote = `${this.config.remote_path}/${userId}-tabs.json`;
             const tabsLocal = `${this.tempBase}/${userId}-tabs.json`;
+            const pendingRemote = `${this.config.remote_path}/${userId}-pending.json`;
+            const pendingLocal = `${this.tempBase}/${userId}-pending.json`;
+
+            if (await sftp.exists(pendingRemote)) {
+                await sftp.fastGet(pendingRemote, pendingLocal);
+            }
             if (await sftp.exists(tabsRemote)) {
                 await sftp.fastGet(tabsRemote, tabsLocal);
             }
@@ -108,15 +119,18 @@ export class ScpStorageProvider implements StorageProvider {
         const remoteBase = `${this.config.remote_path}`;
 
         await sftp.mkdir(`${remoteBase}/${userId}`, true);
+        const faissDir = `${localBase}/${userId}`;
 
         await sftp.delete(`${remoteBase}/${userId}-tabs.json`).catch(() => {});
         await sftp.delete(`${remoteBase}/${userId}-metadata.json`).catch(() => {});
 
         // FAISS folder
-        await sftp.uploadDir(
-            `${localBase}/${userId}`,
-            `${remoteBase}/${userId}`
-        );
+        if (fs.existsSync(faissDir)) {
+            await sftp.uploadDir(
+                faissDir,
+                `${remoteBase}/${userId}`
+            );
+        }
 
         // metadata
         const metadataFile = `${localBase}/${userId}-metadata.json`;
@@ -126,6 +140,13 @@ export class ScpStorageProvider implements StorageProvider {
 
         // tabs
         const tabsFile = `${localBase}/${userId}-tabs.json`;
+        const pendingFile = `${localBase}/${userId}-pending.json`;
+
+        if (fs.existsSync(pendingFile)) {
+            await sftp.put(pendingFile, `${remoteBase}/${userId}-pending.json`);
+        } else {
+            await sftp.delete(`${remoteBase}/${userId}-pending.json`).catch(() => {});
+        }
         if (fs.existsSync(tabsFile)) {
             await sftp.put(tabsFile, `${remoteBase}/${userId}-tabs.json`);
         }
