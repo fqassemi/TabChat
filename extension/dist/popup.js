@@ -29,6 +29,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveApiKeyBtn = document.getElementById("saveApiKey");
     const apiKeyStatus = document.getElementById("apiKeyStatus");
     const loginBtn = document.getElementById("loginBtn");
+    const loginStatus = document.getElementById("loginStatus");
+    const logoutBtn = document.getElementById("logoutBtn");
     const progressText = document.getElementById("progressText");
     const progressFill = document.getElementById("progressFill");
     const closeTabsContainer = document.getElementById("closeTabsContainer");
@@ -91,17 +93,25 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             // 🔥 مهم: چون server تو redirect می‌کنه با #token=
             const url = new URL(result);
-            const hash = url.hash; // "#token=..."
-            const token = hash.split("token=")[1];
+            const params = new URLSearchParams(url.hash.substring(1));
+            const token = params.get("token");
+            const email = params.get("email");
+            const name = params.get("name");
             if (token) {
-                chrome.storage.local.set({ token }, () => {
+                chrome.storage.local.set({ token, userEmail: email, userName: name, }, async () => {
                     console.log("✅ Login success");
-                    status.textContent = "✅Logged in successfully";
+                    await updateLoginUI();
                 });
             }
             else {
                 console.error("❌Token not found in redirect");
             }
+        });
+    });
+    // ------------------ LOGOUT ------------------
+    logoutBtn.addEventListener("click", () => {
+        chrome.storage.local.remove(["token", "userName", "userEmail"], async () => {
+            await updateLoginUI();
         });
     });
     // ------------------ GET TOKEN ------------------
@@ -112,6 +122,32 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         });
     }
+    async function updateLoginUI() {
+        const data = await chrome.storage.local.get([
+            "token",
+            "userName",
+            "userEmail"
+        ]);
+        if (data.token) {
+            loginBtn.style.display = "none";
+            logoutBtn.style.display = "block";
+            loginStatus.innerHTML = `
+        <div class="logged-in">
+          🟢 Signed in<br><br>
+          <strong>Hello ${data.userName || ""}</strong>
+          <p>📧${data.userEmail || ""}</p>
+        </div>
+      `;
+        }
+        else {
+            loginBtn.style.display = "block";
+            logoutBtn.style.display = "none";
+            loginStatus.innerHTML = `
+        🔴 Not signed in
+      `;
+        }
+    }
+    updateLoginUI();
     storageType.addEventListener("change", () => {
         if (storageType.value === "scp") {
             scpSettings.style.display = "block";
@@ -215,16 +251,46 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
             if (!j.ok) {
+                clearInterval(interval);
                 collectStatus.textContent = j.error || "❌ Error during processing.";
                 return;
             }
-            collectStatus.textContent = "✅ collection done.";
-            await chrome.notifications.create({
-                type: "basic",
-                iconUrl: "https://www.google.com/favicon.ico",
-                title: "TabChat",
-                message: "Tabs collected & processed ✅",
-            });
+            clearInterval(interval);
+            progressFill.style.width = "100%";
+            collectStatus.textContent = j.message || "✅ Tabs collected. Indexing in background...";
+            // ------------------ فاز دوم: polling برای ایندکس‌شدن ------------------
+            const indexInterval = setInterval(async () => {
+                try {
+                    const idxRes = await fetch(`${SERVER}/index-status`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    });
+                    const idxData = await idxRes.json();
+                    const percent = idxData.total
+                        ? Math.floor((idxData.indexed / idxData.total) * 100)
+                        : 100;
+                    progressFill.style.width = `${percent}%`;
+                    progressText.textContent = idxData.error
+                        ? `❌ ${idxData.error}`
+                        : `Indexing: ${percent}%`;
+                    if (idxData.done) {
+                        clearInterval(indexInterval);
+                        collectStatus.textContent = idxData.error
+                            ? "❌ Indexing failed."
+                            : "✅ Indexing complete. Ready to chat.";
+                        await chrome.notifications.create({
+                            type: "basic",
+                            iconUrl: "https://www.google.com/favicon.ico",
+                            title: "TabChat",
+                            message: idxData.error
+                                ? "Indexing failed ❌"
+                                : "Tabs indexed & ready to chat ✅",
+                        });
+                    }
+                }
+                catch (err) {
+                    console.error("❌ Index status poll failed:", err);
+                }
+            }, 1000);
             renderCloseTabsPrompt(docs);
         }
         catch (e) {
@@ -289,7 +355,7 @@ document.addEventListener("DOMContentLoaded", () => {
         closeTabsContainer.innerHTML = `
       <hr />
       <div style="font-weight:bold; margin-bottom:6px;">
-        Which tabs should be closed? (Default: None selected)
+        Which tabs should be closed?
       </div>
       <div style="margin-bottom:6px; display:flex; gap:6px;">
         <button id="selectAllBtn" type="button">Select All</button>
@@ -297,7 +363,7 @@ document.addEventListener("DOMContentLoaded", () => {
       </div>
       <div id="closeTabsList" style="max-height:200px; overflow-y:auto; border:1px solid #ddd; padding:4px;"></div>
       <button id="confirmCloseBtn" style="margin-top:8px;">Close checked tabs</button>
-      <button id="cancelCloseBtn" style="margin-top:4px;">Don't close anything for now.</button>
+      <button id="cancelCloseBtn" style="margin-top:4px;">Don't close anything</button>
     `;
         const listDiv = document.getElementById("closeTabsList");
         closable.forEach((doc) => {

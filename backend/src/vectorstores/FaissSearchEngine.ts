@@ -445,4 +445,41 @@ async cleanup(userId: string) {
     this.stores.delete(userId);
     await this.storage?.cleanup(userId);
 }
+
+
+private async getPendingPath(userId: string) {
+  const base = await this.storage?.getLocalPath(userId)
+    ?? path.join(this.basePath, userId);
+
+  return path.join(path.dirname(base), `${userId}-pending.json`);
+}
+
+async savePendingChunks(
+  userId: string,
+  chunks: { text: string; metadata: any }[]
+) {
+  const file = await this.getPendingPath(userId);
+
+  let existing: { text: string; metadata: any }[] = [];
+  if (fs.existsSync(file)) {
+    existing = JSON.parse(fs.readFileSync(file, "utf8"));
+  }
+
+  fs.writeFileSync(file, JSON.stringify(existing.concat(chunks)));
+}
+
+async getPendingChunks(userId: string) {
+  const file = await this.getPendingPath(userId);
+  if (!fs.existsSync(file)) return [];
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+async clearPendingChunks(userId: string) {
+  const file = await this.getPendingPath(userId);
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+}
+
+async prepareStorage(userId: string) {
+    await this.storage?.beforeLoad(userId);
+}
 }
