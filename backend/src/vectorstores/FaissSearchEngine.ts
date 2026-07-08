@@ -204,6 +204,11 @@ export class FaissSearchEngine {
 
     async saveUrls(userId: string, urls: string[]) {
       const file = await this.getMetadataPath(userId);
+      const dir = path.dirname(file);
+
+      if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+      }
 
       const existing = await this.getExistingUrls(userId);
 
@@ -242,6 +247,11 @@ export class FaissSearchEngine {
       }[]
     ) {
       const file = await this.getTabsPath(userId);
+      const dir = path.dirname(file);
+
+      if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+      }
 
       let existing: {
         title: string;
@@ -459,6 +469,11 @@ async savePendingChunks(
   chunks: { text: string; metadata: any }[]
 ) {
   const file = await this.getPendingPath(userId);
+  const dir = path.dirname(file);
+
+  if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+  }
 
   let existing: { text: string; metadata: any }[] = [];
   if (fs.existsSync(file)) {
