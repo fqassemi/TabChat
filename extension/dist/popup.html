@@ -29,11 +29,15 @@
 <body>
 <h1>TabChat</h1>
   <button id="loginBtn">Login with Google</button>
-
-  <h3>LLM Configuration</h3>
-  <label>OpenAI API Key:</label>
+  <div id="loginStatus"></div>
+  <button id="logoutBtn" style="display:none;">
+    Logout
+  </button>
+  <hr />
+<!--  <h3>LLM Configuration</h3>-->
+  <h3>OpenAI API Key:</h3>
   <input type="password" id="openaiKey" placeholder="sk-..." />
-  <button id="saveApiKey">Save API Key</button>
+  <button id="saveApiKey">Save</button>
   <div id="apiKeyStatus"></div>
 
   <hr />
@@ -41,7 +45,7 @@
 
 <h3>Storage</h3>
 
-<label>Storage Type</label>
+<label>Type</label>
 
 <select id="storageType">
 
@@ -87,7 +91,7 @@
 </div>
 
 <button id="saveStorage">
-    Save Storage
+    Save
 </button>
 
 <div id="storageStatus"></div>
@@ -105,8 +109,8 @@
   <div id="closeTabsContainer" style="display:none;"></div>
   <div id="closeTabStatus"></div>
   <hr />
-  <button id="openOverlay">Search Tabs</button>
-  <button id="chatBtn">Chat with this tab</button>
+  <button id="openOverlay">Search</button>
+  <button id="chatBtn">Chat</button>
 
   <div id="status"></div>
 
@@ -115,7 +119,7 @@
   <button id="myTabsBtn">My Tabs</button>
 
   <div id="tabsContainer" style="display:none;">
-    <input id="tabsSearch" placeholder="Search tabs..." />
+    <input id="tabsSearch" placeholder="Search..." />
     <div id="tabsList"></div>
   </div>
   <button id="loadMoreBtn" style="display:none;">

@@ -25,6 +25,8 @@ function isExcludedUrl(url: string): boolean {
 type StorageData = {
   token?: string;
   openaiKey?: string;
+  userEmail?: string;
+  userName?: string;
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -40,6 +42,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLDivElement;
 
   const loginBtn = document.getElementById("loginBtn") as HTMLButtonElement;
+  const loginStatus = document.getElementById("loginStatus") as HTMLDivElement;
+  const logoutBtn =
+  document.getElementById("logoutBtn") as HTMLButtonElement;
 
   const progressText = document.getElementById("progressText") as HTMLDivElement;
   const progressFill = document.getElementById("progressFill") as HTMLDivElement;
@@ -132,19 +137,28 @@ document.getElementById("storageStatus") as HTMLDivElement;
         // 🔥 مهم: چون server تو redirect می‌کنه با #token=
         const url = new URL(result);
 
-        const hash = url.hash; // "#token=..."
-        const token = hash.split("token=")[1];
+        const params = new URLSearchParams(url.hash.substring(1));
+
+        const token = params.get("token");
+        const email = params.get("email");
+        const name = params.get("name");
 
         if (token) {
-          chrome.storage.local.set({ token }, () => {
+          chrome.storage.local.set({ token, userEmail: email, userName: name, }, async () => {
             console.log("✅ Login success");
-            status.textContent = "✅Logged in successfully";
+            await updateLoginUI();
           });
         } else {
           console.error("❌Token not found in redirect");
         }
       }
     );
+  });
+// ------------------ LOGOUT ------------------
+  logoutBtn.addEventListener("click", () => {
+    chrome.storage.local.remove(["token", "userName", "userEmail"], async () => {
+      await updateLoginUI();
+    });
   });
 
   // ------------------ GET TOKEN ------------------
@@ -155,6 +169,35 @@ document.getElementById("storageStatus") as HTMLDivElement;
       });
     });
   }
+
+  async function updateLoginUI() {
+    const data = await chrome.storage.local.get([
+      "token",
+      "userName",
+      "userEmail"
+    ]);
+
+    if (data.token) {
+      loginBtn.style.display = "none";
+      logoutBtn.style.display = "block";
+
+      loginStatus.innerHTML = `
+        <div class="logged-in">
+          🟢 Signed in<br><br>
+          <strong>Hello ${data.userName || ""}</strong>
+          <p>📧${data.userEmail || ""}</p>
+        </div>
+      `;
+    } else {
+      loginBtn.style.display = "block";
+      logoutBtn.style.display = "none";
+
+      loginStatus.innerHTML = `
+        🔴 Not signed in
+      `;
+    }
+  }
+  updateLoginUI();
 
 storageType.addEventListener(
   "change",
@@ -421,7 +464,7 @@ saveStorage.addEventListener(
     closeTabsContainer.innerHTML = `
       <hr />
       <div style="font-weight:bold; margin-bottom:6px;">
-        Which tabs should be closed? (Default: None selected)
+        Which tabs should be closed?
       </div>
       <div style="margin-bottom:6px; display:flex; gap:6px;">
         <button id="selectAllBtn" type="button">Select All</button>
@@ -429,7 +472,7 @@ saveStorage.addEventListener(
       </div>
       <div id="closeTabsList" style="max-height:200px; overflow-y:auto; border:1px solid #ddd; padding:4px;"></div>
       <button id="confirmCloseBtn" style="margin-top:8px;">Close checked tabs</button>
-      <button id="cancelCloseBtn" style="margin-top:4px;">Don't close anything for now.</button>
+      <button id="cancelCloseBtn" style="margin-top:4px;">Don't close anything</button>
     `;
 
     const listDiv = document.getElementById("closeTabsList") as HTMLDivElement;

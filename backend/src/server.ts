@@ -148,8 +148,10 @@ app.get("/auth/google/callback", async (req, res) => {
     console.error("❌ session insert failed:", err);
   }
 
-  // 👇 این مهم‌ترین بخشه
-  return res.redirect(`${redirect_uri}#token=${jwt}`);
+
+  return res.redirect(
+    `${redirect_uri}#token=${jwt}&email=${encodeURIComponent(user.email)}&name=${encodeURIComponent(userInfo.name)}`
+  );
 });
 
 // ------------------ AUTH MIDDLEWARE ------------------

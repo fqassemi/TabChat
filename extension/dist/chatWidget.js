@@ -85,7 +85,7 @@
             alignItems: "center",
         });
         const title = document.createElement("span");
-        title.textContent = "Chat with RAG";
+        title.textContent = "Chat";
         title.style.fontWeight = "bold";
         const closeBtn = document.createElement("button");
         closeBtn.textContent = "✕";
