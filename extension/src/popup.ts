@@ -181,19 +181,27 @@ document.getElementById("storageStatus") as HTMLDivElement;
       loginBtn.style.display = "none";
       logoutBtn.style.display = "block";
 
+      const name = (data.userName as string) || "User";
+      const initial = name.trim().charAt(0).toUpperCase() || "U";
+
       loginStatus.innerHTML = `
         <div class="logged-in">
-          🟢 Signed in<br><br>
-          <strong>Hello ${data.userName || ""}</strong>
-          <p>📧${data.userEmail || ""}</p>
+          <div class="avatar">${initial}</div>
+          <div class="info">
+            <span class="name">${name}</span>
+            <span class="email">${data.userEmail || ""}</span>
+          </div>
         </div>
       `;
     } else {
-      loginBtn.style.display = "block";
+      loginBtn.style.display = "flex";
       logoutBtn.style.display = "none";
 
       loginStatus.innerHTML = `
-        🔴 Not signed in
+        <div class="logged-out">
+          <span class="status-dot"></span>
+          Not signed in
+        </div>
       `;
     }
   }
@@ -285,6 +293,7 @@ saveStorage.addEventListener(
 
   // Collect tabs
     collect.addEventListener("click", async () => {
+      document.getElementById("progressContainer")!.style.display = "block";
       collectStatus.textContent = "Collecting tabs...";
 
         const apiKey = await new Promise<string | undefined>((resolve) => {
@@ -319,6 +328,8 @@ saveStorage.addEventListener(
         try {
           progressText.textContent = "0%";
           progressFill.style.width = "0%";
+          progressFill.classList.remove("done");
+          document.getElementById("progressContainer")!.style.display = "block";
           const ingestPromise = fetch(`${SERVER}/ingest`, {
             method: "POST",
             headers: {
@@ -350,6 +361,7 @@ saveStorage.addEventListener(
               clearInterval(interval);
 
               progressFill.style.width = "100%";
+              progressFill.classList.add("done");
               progressText.textContent = `✅ ${data.processed}/${data.total} Tabs`;
             }
           }, 500);
@@ -396,6 +408,7 @@ saveStorage.addEventListener(
 
               if (idxData.done) {
                 clearInterval(indexInterval);
+                progressFill.classList.add(idxData.error ? "" : "done");
                 collectStatus.textContent = idxData.error
                   ? "❌ Indexing failed."
                   : "✅ Indexing complete. Ready to chat.";
