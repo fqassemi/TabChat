@@ -8,9 +8,13 @@
         return /[\u0600-\u06FF]/.test(text);
     }
     async function injectChatWidget() {
-        const apiKey = await new Promise((resolve) => chrome.storage.local.get(["openaiKey"], (data) => {
-            const key = data.openaiKey;
-            resolve(typeof key === "string" ? key : "");
+        const apiKey = await new Promise((resolve) => chrome.storage.local.get(["openaiKey", "apiKeyMode"], (data) => {
+            if (data.apiKeyMode === "custom" && typeof data.openaiKey === "string") {
+                resolve(data.openaiKey);
+            }
+            else {
+                resolve(undefined);
+            }
         }));
         if (document.getElementById("chat-widget"))
             return;

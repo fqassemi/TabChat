@@ -25,6 +25,7 @@ function isExcludedUrl(url: string): boolean {
 type StorageData = {
   token?: string;
   openaiKey?: string;
+  apiKeyMode?: "default" | "custom";
   userEmail?: string;
   userName?: string;
 };
@@ -40,6 +41,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const openaiKeyInput = document.getElementById("openaiKey") as HTMLInputElement;
   const saveApiKeyBtn = document.getElementById("saveApiKey") as HTMLButtonElement;
   const apiKeyStatus = document.getElementById("apiKeyStatus") as HTMLDivElement;
+  const apiKeyModeSelect = document.getElementById("apiKeyMode") as HTMLSelectElement;
+  const customApiKeySettings = document.getElementById("customApiKeySettings") as HTMLDivElement;
 
   const loginBtn = document.getElementById("loginBtn") as HTMLButtonElement;
   const loginStatus = document.getElementById("loginStatus") as HTMLDivElement;
@@ -89,29 +92,48 @@ document.getElementById("storageStatus") as HTMLDivElement;
 
   console.log("Popup loaded ✅");
 
-  // ------------------ LOAD API KEY ------------------
-  chrome.storage.local.get(["openaiKey"], (data: StorageData) => {
+  // ------------------ LOAD API KEY MODE ------------------
+  chrome.storage.local.get(["openaiKey", "apiKeyMode"], (data: StorageData) => {
+    const mode = data.apiKeyMode === "custom" ? "custom" : "default";
+    apiKeyModeSelect.value = mode;
+    customApiKeySettings.style.display = mode === "custom" ? "block" : "none";
     if (data.openaiKey) {
       openaiKeyInput.value = "********";
     }
   });
 
+  apiKeyModeSelect.addEventListener("change", () => {
+    customApiKeySettings.style.display =
+      apiKeyModeSelect.value === "custom" ? "block" : "none";
+  });
+
   // ------------------ SAVE API KEY ------------------
   saveApiKeyBtn.addEventListener("click", () => {
-    const key = openaiKeyInput.value.trim();
-    if (!key) {
-      chrome.storage.local.remove("openaiKey", () => {
-        apiKeyStatus.textContent =
-          "✅ Using default server API key.";
+    const mode = apiKeyModeSelect.value;
+
+    if (mode === "default") {
+      chrome.storage.local.set({ apiKeyMode: "default" }, () => {
+        chrome.storage.local.remove("openaiKey", () => {
+          apiKeyStatus.textContent = "✅ Using our default API key.";
+        });
       });
+      return;
+    }
+
+    // mode === "custom"
+    const key = openaiKeyInput.value.trim();
+
+    if (!key || key === "********") {
+      apiKeyStatus.textContent = "❌ Please enter your API key.";
       return;
     }
     if (!key.startsWith("sk-")) {
       apiKeyStatus.textContent = "❌ Invalid API key format.";
       return;
     }
-    chrome.storage.local.set({ openaiKey: key }, () => {
-      apiKeyStatus.textContent = "✅ API key saved locally.";
+
+    chrome.storage.local.set({ apiKeyMode: "custom", openaiKey: key }, () => {
+      apiKeyStatus.textContent = "✅ Your API key saved locally.";
     });
   });
 
@@ -169,6 +191,22 @@ document.getElementById("storageStatus") as HTMLDivElement;
       });
     });
   }
+
+  // ------------------ GET API KEY (based on mode) ------------------
+   function getApiKeyForRequest(): Promise<string | undefined> {
+     return new Promise((resolve) => {
+       chrome.storage.local.get(
+         ["apiKeyMode", "openaiKey"],
+         (data: StorageData) => {
+           if (data.apiKeyMode === "custom" && data.openaiKey) {
+             resolve(data.openaiKey);
+           } else {
+             resolve(undefined);
+           }
+         }
+       );
+     });
+   }
 
   async function updateLoginUI() {
     const data = await chrome.storage.local.get([
@@ -296,12 +334,7 @@ saveStorage.addEventListener(
       document.getElementById("progressContainer")!.style.display = "block";
       collectStatus.textContent = "Collecting tabs...";
 
-        const apiKey = await new Promise<string | undefined>((resolve) => {
-          chrome.storage.local.get(["openaiKey"], (data) => {
-            const typed = data as StorageData;
-            resolve(typed.openaiKey);
-          });
-        });
+        const apiKey = await getApiKeyForRequest();
 
 
 
@@ -471,7 +504,7 @@ saveStorage.addEventListener(
     loading = true;
 
     const token = await getToken();
-    const { openaiKey } = (await chrome.storage.local.get(["openaiKey"])) as StorageData;
+    const apiKey = await getApiKeyForRequest();
 
     const res = await fetch(
       `${SERVER}/tabs?limit=${limit}&offset=${offset}`,
@@ -628,7 +661,7 @@ saveStorage.addEventListener(
 
         const token = await getToken();
 
-        const { openaiKey } = await chrome.storage.local.get(["openaiKey"]);
+        const apiKey = await getApiKeyForRequest();
 
         const res = await fetch(`${SERVER}/tabs`, {
           method: "DELETE",
@@ -638,7 +671,7 @@ saveStorage.addEventListener(
           },
           body: JSON.stringify({
             url: tab.url,
-            apiKey: openaiKey || undefined,
+            apiKey,
           }),
         });
 

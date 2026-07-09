@@ -49,18 +49,26 @@
 <hr />
 <!--  <h3>LLM Configuration</h3>-->
 <details class="settings-block">
-  <summary>⚙️ OpenAI API Key</summary>
-  <input type="password" id="openaiKey" placeholder="sk-..." />
+  <summary>⚙️ OpenAI ApiKey (optional)</summary>
+  <label>Source</label>
+  <select id="apiKeyMode">
+    <option value="default">Our ApiKey (default)</option>
+    <option value="custom">Your ApiKey</option>
+  </select>
+  <div id="customApiKeySettings" style="display:none;">
+    <label>API Key</label>
+    <input type="password" id="openaiKey" placeholder="sk-..." />
+  </div>
   <button id="saveApiKey">Save</button>
   <div id="apiKeyStatus"></div>
 </details>
 
 <details class="settings-block">
-  <summary>🗄️ Storage Settings</summary>
+  <summary>🗄️ Storage (optional)</summary>
   <label>Type</label>
   <select id="storageType">
-    <option value="local">Default</option>
-    <option value="scp">My Server (SCP)</option>
+    <option value="local">Our Storage (default)</option>
+    <option value="scp">Your Storage</option>
   </select>
   <div id="scpSettings" style="display:none;">
     <label>Host</label>
