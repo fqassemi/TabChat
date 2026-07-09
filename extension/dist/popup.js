@@ -1,6 +1,6 @@
 "use strict";
 // popup.ts
-const SERVER = "http://localhost:8000";
+const SERVER = "https://tabchat-production-f7d0.up.railway.app";
 const EXCLUDED_DOMAINS = [
     // AI
     "claude.ai",
