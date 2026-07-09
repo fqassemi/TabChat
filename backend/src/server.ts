@@ -16,6 +16,7 @@ import {
   saveUserStorage
 } from "./repositories/storage.ts";
 import { runExclusive } from "./jobs/PerUserQueue.ts";
+import type { EmbeddingConfig } from "./vectorstores/FaissSearchEngine.ts";
 
 const app = express();
 
@@ -62,18 +63,141 @@ app.use(cors({ origin: "*" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 
 
-function resolveApiKey(apiKey?: string) {
+type ProviderInput = {
+  apiKey?: string;
+  baseURL?: string;
+  model?: string;
+};
 
-  if (apiKey?.startsWith("sk-")) {
-    return apiKey;
-  }
+// ------------------ Provider Resolution ------------------
 
-  if (DEFAULT_OPENAI_API_KEY?.startsWith("sk-")) {
-    return DEFAULT_OPENAI_API_KEY;
-  }
+const DEFAULT_OPENAI_CHAT_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
 
-  throw new Error("No OpenAI API key configured.");
+// نگاشت baseURL شناخته‌شده -> مدل چت پیش‌فرض
+// وقتی کاربر مدل وارد نمی‌کنه، از اینجا حدس زده می‌شه
+const KNOWN_CHAT_MODELS: { match: string; model: string }[] = [
+  { match: "api.groq.com", model: "llama-3.3-70b-versatile" },
+  { match: "openrouter.ai", model: "openai/gpt-4o-mini" },
+  { match: "api.together.xyz", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
+  { match: "api.deepseek.com", model: "deepseek-chat" },
+  { match: "api.mistral.ai", model: "mistral-small-latest" },
+];
+
+function isOpenAIBaseURL(baseURL?: string) {
+  if (!baseURL) return true;
+  const normalized = baseURL.trim().replace(/\/+$/, "").toLowerCase();
+  return normalized === "" || normalized.includes("api.openai.com");
 }
+
+function pickChatModel(baseURL?: string): string {
+  if (isOpenAIBaseURL(baseURL)) return DEFAULT_OPENAI_CHAT_MODEL;
+
+  const found = KNOWN_CHAT_MODELS.find((p) => baseURL!.includes(p.match));
+  if (found) return found.model;
+
+  throw new Error(
+    `Unsupported provider. We don't have a default model mapped for this endpoint yet. Please contact support, or leave Base URL empty to use OpenAI.`
+  );
+}
+
+type ChatInput = { apiKey?: string; baseURL?: string };
+
+function resolveProviders(input?: ChatInput) {
+  let chatApiKey: string;
+  let chatBaseURL: string | undefined;
+  let chatModel: string;
+
+  if (input?.apiKey) {
+    chatApiKey = input.apiKey;
+    chatBaseURL = isOpenAIBaseURL(input.baseURL) ? undefined : input.baseURL;
+    chatModel = pickChatModel(input.baseURL);
+  } else {
+    if (!DEFAULT_OPENAI_API_KEY?.startsWith("sk-")) {
+      throw new Error("No API key configured.");
+    }
+    chatApiKey = DEFAULT_OPENAI_API_KEY;
+    chatModel = DEFAULT_OPENAI_CHAT_MODEL;
+  }
+
+  // Embedding: فقط اگه کلید کاربر مال OpenAI باشه ازش استفاده می‌کنیم،
+  // در غیر این صورت (مثل Groq که embedding نداره) از کلید پیش‌فرض ما استفاده می‌شه
+  const userKeyIsOpenAI = input?.apiKey && isOpenAIBaseURL(input.baseURL);
+
+  let embeddingApiKey: string;
+  if (userKeyIsOpenAI) {
+    embeddingApiKey = input!.apiKey!;
+  } else {
+    if (!DEFAULT_OPENAI_API_KEY?.startsWith("sk-")) {
+      throw new Error("No embedding API key configured.");
+    }
+    embeddingApiKey = DEFAULT_OPENAI_API_KEY;
+  }
+
+  return {
+    chat: { apiKey: chatApiKey, baseURL: chatBaseURL, model: chatModel },
+    embedding: { apiKey: embeddingApiKey, model: DEFAULT_OPENAI_EMBEDDING_MODEL },
+  };
+}
+
+
+function interpretProviderError(err: any): string {
+  const status = err?.status || err?.response?.status;
+  const rawMessage: string = err?.message || err?.error?.message || "";
+
+  if (status === 401 || /invalid api key|incorrect api key/i.test(rawMessage)) {
+    return "❌ Invalid or expired API key.";
+  }
+  if (status === 404 || /model.*(does not exist|not found)/i.test(rawMessage)) {
+    return "❌ Model not found on this endpoint. This provider may not be supported yet.";
+  }
+  if (status === 429) {
+    return "⚠️ Key looks valid, but you're rate-limited or out of quota.";
+  }
+  if (status === 403) {
+    return "❌ Access denied. Check your key's permissions or billing status.";
+  }
+  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(rawMessage)) {
+    return "❌ Could not reach this endpoint. Check the Base URL.";
+  }
+  return `❌ Validation failed: ${rawMessage || "Unknown error"}`;
+}
+
+function normalizeBaseURL(baseURL?: string): string | undefined {
+  if (!baseURL) return undefined;
+  const trimmed = baseURL.trim().replace(/\/+$/, "");
+  if (!trimmed) return undefined;
+  if (!/^https?:\/\//i.test(trimmed)) {
+    throw new Error("Base URL must start with http:// or https://");
+  }
+  return trimmed;
+}
+
+
+function interpretStorageError(err: any): string {
+  const rawMessage: string = err?.message || "";
+
+  if (/authentication|auth fail|permission denied \(publickey|password/i.test(rawMessage)) {
+    return "❌ Authentication failed. Check your username/password.";
+  }
+  if (/ENOTFOUND|getaddrinfo|EHOSTUNREACH/i.test(rawMessage)) {
+    return "❌ Host not found. Check the server address.";
+  }
+  if (/ECONNREFUSED/i.test(rawMessage)) {
+    return "❌ Connection refused. Check the host and port, and that SSH/SFTP is running.";
+  }
+  if (/ETIMEDOUT|timed out/i.test(rawMessage)) {
+    return "❌ Connection timed out. Check the host address and your network/firewall.";
+  }
+  if (/no such file|not exist|ENOENT/i.test(rawMessage)) {
+    return "❌ Remote path does not exist. Check the path or create it first.";
+  }
+  if (/permission denied/i.test(rawMessage)) {
+    return "❌ Permission denied on the remote path.";
+  }
+  return `❌ Connection failed: ${rawMessage || "Unknown error"}`;
+}
+
 
 // ------------------ GOOGLE LOGIN ------------------
 app.get("/auth/google/login", (req, res) => {
@@ -175,11 +299,51 @@ function requireAuth(req: any, res: any, next: any) {
   }
 }
 
+// ------------------ Validate Provider ------------------
+app.post("/validate-provider", async (req: any, res) => {
+  const { apiKey, baseURL: rawBaseURL } = req.body;
+
+  if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+    return res.status(400).json({ ok: false, error: "❌ API key is required." });
+  }
+
+  let baseURL: string | undefined;
+  let model: string;
+
+  try {
+    baseURL = normalizeBaseURL(rawBaseURL);
+    model = pickChatModel(baseURL);
+  } catch (err: any) {
+    return res.status(400).json({ ok: false, error: `❌ ${err.message}` });
+  }
+
+  try {
+    const testLLM = new ChatOpenAI({
+      apiKey,
+      model,
+      temperature: 0,
+      maxTokens: 5,
+      timeout: 15000,
+      configuration: isOpenAIBaseURL(baseURL) ? undefined : { baseURL },
+    });
+
+    await testLLM.invoke("ping");
+
+    res.json({ ok: true, model });
+  } catch (err: any) {
+    console.error("❌ Provider validation failed:", err?.message || err);
+    res.status(400).json({ ok: false, error: interpretProviderError(err) });
+  }
+});
+
 // ------------------ Ingest ------------------
 app.post("/ingest", requireAuth, async (req: any, res) => {
-  const { docs, apiKey } = req.body;
+  const { docs, chatApiKey, chatBaseURL } = req.body;
   const userId = req.userId;
-  const key = resolveApiKey(apiKey);
+  const { embedding: embeddingConfig } = resolveProviders({
+    apiKey: chatApiKey,
+    baseURL: chatBaseURL,
+  });
 
   if (!Array.isArray(docs) || !docs.length)
     return res.status(400).json({ ok: false, error: "❌ Invalid or empty docs array." });
@@ -312,7 +476,7 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
       countChunks: allChunksToIndex.length,
       message: `✅ ${countTabs} tab collected. Indexing started in background.`,
     });
-    startBackgroundIndexing(userId, key);
+    startBackgroundIndexing(userId, embeddingConfig);
   } catch (err: any) {
     console.error("❌ Ingest error:", err);
     if (!res.headersSent) {
@@ -322,7 +486,7 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
 });
 
 
-function startBackgroundIndexing(userId: string, apiKey: string) {
+function startBackgroundIndexing(userId: string, embeddingConfig: EmbeddingConfig) {
   runExclusive(userId, async () => {
     const engine = await getFaissEngine(userId);
 
@@ -332,7 +496,11 @@ function startBackgroundIndexing(userId: string, apiKey: string) {
 
       indexProgress.set(userId, { indexed: 0, total: pending.length, done: false });
 
-      const embedder = new OpenAIEmbeddings({ apiKey });
+      const embedder = new OpenAIEmbeddings({
+        apiKey: embeddingConfig.apiKey,
+        model: embeddingConfig.model,
+        configuration: embeddingConfig.baseURL ? { baseURL: embeddingConfig.baseURL } : undefined,
+      });
 
       // به‌جای یک درخواست عظیم، دسته‌ای (batch) embed می‌کنیم
       // تا هم rate-limit امن‌تر باشه هم progress قابل گزارش باشه
@@ -355,7 +523,7 @@ function startBackgroundIndexing(userId: string, apiKey: string) {
         });
       }
 
-      await engine.syncFromDocuments(docsWithEmbeddings, apiKey, userId);
+      await engine.syncFromDocuments(docsWithEmbeddings, embeddingConfig, userId);
       await engine.clearPendingChunks(userId);
       await engine.syncStorage(userId);
 
@@ -413,12 +581,15 @@ app.get("/tabs", requireAuth, async (req: any, res) => {
   const limit = parseInt(req.query.limit || "5");
   const offset = parseInt(req.query.offset || "0");
 
-  const key = resolveApiKey(req.query.apiKey as string | undefined);
+  const { embedding: embeddingConfig } = resolveProviders({
+    apiKey: req.query.chatApiKey as string | undefined,
+    baseURL: req.query.chatBaseURL as string | undefined,
+  });
 
   await runExclusive(userId, async () => {
     const engine = await getFaissEngine(userId);
     try {
-      await engine.init(key, userId);
+      await engine.init(embeddingConfig, userId);
 
       const tabs = await engine.getTabs(userId);
       const paginated = tabs.slice(offset, offset + limit);
@@ -445,19 +616,22 @@ app.get("/tabs", requireAuth, async (req: any, res) => {
 
 // ------------------ Delete Tab ------------------
 app.delete("/tabs", requireAuth, async (req: any, res) => {
-  const { url, apiKey } = req.body;
+  const { url, chatApiKey, chatBaseURL } = req.body;
   const userId = req.userId;
 
   if (!url) {
     return res.status(400).json({ ok: false, error: "Missing url" });
   }
 
-  const key = resolveApiKey(apiKey);
+  const { embedding: embeddingConfig } = resolveProviders({
+    apiKey: chatApiKey,
+    baseURL: chatBaseURL,
+  });
 
   await runExclusive(userId, async () => {
     const engine = await getFaissEngine(userId);
     try {
-      await engine.deleteByUrl(userId, key, url);
+      await engine.deleteByUrl(userId, embeddingConfig, url);
       await engine.deleteTab(userId, url);
       await engine.deleteUrl(userId, url);
       await engine.syncStorage(userId);
@@ -476,20 +650,23 @@ app.delete("/tabs", requireAuth, async (req: any, res) => {
 
 // ------------------ Chat ------------------
 app.post("/chat", requireAuth, async (req: any, res) => {
-  const { question, apiKey, url } = req.body;
+  const { question, url, chatApiKey, chatBaseURL } = req.body;
   const userId = req.userId;
 
   if (!question?.trim()) {
     return res.status(400).json({ answer: "Question required." });
   }
 
-  const key = resolveApiKey(apiKey);
+  const { chat: chatConfig, embedding: embeddingConfig } = resolveProviders({
+    apiKey: chatApiKey,
+    baseURL: chatBaseURL,
+  });
 
   await runExclusive(userId, async () => {
     let topResults: any[] = [];
     const engine = await getFaissEngine(userId);
     try {
-      topResults = await engine.search(question, key, userId, 10, url);
+      topResults = await engine.search(question, embeddingConfig, userId, 10, url);
 
       if (!topResults.length) {
         return res.json({
@@ -509,7 +686,17 @@ app.post("/chat", requireAuth, async (req: any, res) => {
           ? context.slice(0, MAX_CONTEXT_SIZE)
           : context;
 
-      const chatLLM = new ChatOpenAI({ key, temperature: 0 });
+      console.log("===== Chat Config =====");
+      console.log("API Key:", chatConfig.apiKey?.slice(0, 8) + "...");
+      console.log("Base URL:", chatConfig.baseURL);
+      console.log("Model:", chatConfig.model);
+
+      const chatLLM = new ChatOpenAI({
+        apiKey: chatConfig.apiKey,
+        model: chatConfig.model,
+        temperature: 0,
+        configuration: chatConfig.baseURL ? { baseURL: chatConfig.baseURL } : undefined,
+      });
 
       const response = await chatLLM.invoke([
         {
@@ -550,15 +737,18 @@ app.post("/chat", requireAuth, async (req: any, res) => {
 
 // ------------------ Search ------------------
 app.post("/search", requireAuth, async (req: any, res) => {
-  const { q, apiKey } = req.body;
+  const { q, chatApiKey, chatBaseURL } = req.body;
   const userId = req.userId;
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
-  const key = resolveApiKey(apiKey);
+  const { embedding: embeddingConfig } = resolveProviders({
+    apiKey: chatApiKey,
+    baseURL: chatBaseURL,
+  });
 
   await runExclusive(userId, async () => {
     const engine = await getFaissEngine(userId);
     try {
-      const results = await engine.search(q, key, userId, 5);
+      const results = await engine.search(q, embeddingConfig, userId, 5);
 
       const cleanResults = results
         .filter((r) => r.text !== "init" && r.metadata?.meta !== "init")
@@ -601,6 +791,13 @@ app.post(
 
     try {
        if (type === "scp") {
+         if (!host || !username || !remote_path) {
+           return res.status(400).json({
+             ok: false,
+             error: "❌ Host, username, and remote path are required.",
+           });
+         }
+
          const { ScpStorageProvider } =
              await import("./storage/ScpStorageProvider.ts");
 
@@ -631,10 +828,15 @@ app.post(
       });
 
     } catch (err: any) {
+      console.error("❌ Storage validation failed:", err?.message || err);
 
-      res.status(500).json({
+      const message = type === "scp"
+        ? interpretStorageError(err)
+        : `❌ ${err.message}`;
+
+      res.status(400).json({
         ok: false,
-        error: err.message
+        error: message
       });
 
     }

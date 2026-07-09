@@ -8,15 +8,6 @@
   }
 
   async function injectChatWidget() {
-    const apiKey: string | undefined = await new Promise((resolve) =>
-      chrome.storage.local.get(["openaiKey", "apiKeyMode"], (data) => {
-        if (data.apiKeyMode === "custom" && typeof data.openaiKey === "string") {
-          resolve(data.openaiKey);
-        } else {
-          resolve(undefined);
-        }
-      })
-    );
 
     if (document.getElementById("chat-widget")) return;
 
@@ -394,7 +385,11 @@
       showTyping();
 
       try {
-        const storage = await chrome.storage.local.get(["token", "openaiKey"]);
+        const storage = await chrome.storage.local.get([
+          "token",
+          "chatApiKey",
+          "chatBaseUrl",
+        ]);
         const token = storage.token;
 
         if (!token) {
@@ -411,8 +406,9 @@
           },
           body: JSON.stringify({
             question,
-            apiKey,
             url: window.location.href,
+            chatApiKey: storage.chatApiKey,
+            chatBaseURL: storage.chatBaseUrl,
           }),
         });
 

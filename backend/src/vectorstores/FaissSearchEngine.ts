@@ -4,6 +4,13 @@ import { FaissStore } from "@langchain/community/vectorstores/faiss";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import type { StorageProvider } from "../storage/StorageProvider.ts";
 
+
+export type EmbeddingConfig = {
+  apiKey: string;
+  baseURL?: string;
+  model?: string;
+};
+
 export class FaissSearchEngine {
   private basePath: string;
   private stores: Map<string, FaissStore> = new Map();
@@ -35,13 +42,17 @@ export class FaissSearchEngine {
 
   }
 
-  async init(apiKey: string, userId: string) {
+  async init(config: EmbeddingConfig, userId: string) {
     if (!userId) {
       throw new Error("userId is required");
     }
 
     if (!this.embedder) {
-      this.embedder = new OpenAIEmbeddings({ apiKey });
+          this.embedder = new OpenAIEmbeddings({
+            apiKey: config.apiKey,
+            model: config.model,
+            configuration: config.baseURL ? { baseURL: config.baseURL } : undefined,
+          });
     }
 
     const isTemp = this.storage?.isTemporary?.() ?? false;
@@ -124,7 +135,7 @@ export class FaissSearchEngine {
       metadata: any;
       embedding?: number[];
     }[],
-    apiKey: string,
+    config: EmbeddingConfig,
     userId: string
   ) {
     if (!docs?.length) {
@@ -134,7 +145,7 @@ export class FaissSearchEngine {
       return;
     }
 
-    await this.init(apiKey, userId);
+    await this.init(config, userId);
 
     const store = this.stores.get(userId);
 
@@ -332,10 +343,10 @@ export class FaissSearchEngine {
 
     async deleteByUrl(
       userId: string,
-      apiKey: string,
+      config: EmbeddingConfig,
       url: string
     ) {
-      await this.init(apiKey, userId);
+      await this.init(config, userId);
 
       const store = this.stores.get(userId);
 
@@ -379,12 +390,12 @@ export class FaissSearchEngine {
 
   async search(
     query: string,
-    apiKey: string,
+    config: EmbeddingConfig,
     userId: string,
     k = 5,
     url?: string
   ) {
-    await this.init(apiKey, userId);
+    await this.init(config, userId);
 
     const store = this.stores.get(userId);
 

@@ -273,12 +273,12 @@ function openSearchOverlay() {
       <div class="skeleton"></div>
       <div class="skeleton"></div>
     `;
-        const settingsData = await chrome.storage.local.get(["openaiKey", "apiKeyMode"]);
-        const apiKey = settingsData.apiKeyMode === "custom"
-            ? settingsData.openaiKey
-            : undefined;
         try {
-            const storage = await chrome.storage.local.get(["token", "openaiKey",]);
+            const storage = await chrome.storage.local.get([
+                "token",
+                "chatApiKey",
+                "chatBaseUrl",
+            ]);
             const token = storage.token;
             if (!token) {
                 resultsDiv.innerHTML = `
@@ -286,7 +286,7 @@ function openSearchOverlay() {
       `;
                 return;
             }
-            const r = await fetch("https://tabchat-production-f7d0.up.railway.app/search", {
+            const r = await fetch("http://localhost:8000/search", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -294,7 +294,8 @@ function openSearchOverlay() {
                 },
                 body: JSON.stringify({
                     q,
-                    apiKey,
+                    chatApiKey: storage.chatApiKey,
+                    chatBaseURL: storage.chatBaseUrl,
                 }),
             });
             const j = await r.json();

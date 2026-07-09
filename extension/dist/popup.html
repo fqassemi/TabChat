@@ -49,18 +49,13 @@
 <hr />
 <!--  <h3>LLM Configuration</h3>-->
 <details class="settings-block">
-  <summary>⚙️ OpenAI ApiKey (optional)</summary>
-  <label>Source</label>
-  <select id="apiKeyMode">
-    <option value="default">Our ApiKey (default)</option>
-    <option value="custom">Your ApiKey</option>
-  </select>
-  <div id="customApiKeySettings" style="display:none;">
-    <label>API Key</label>
-    <input type="password" id="openaiKey" placeholder="sk-..." />
-  </div>
-  <button id="saveApiKey">Save</button>
-  <div id="apiKeyStatus"></div>
+  <summary>ApiKey (optional)</summary><br>
+  <label>API Key</label>
+  <input type="password" id="chatApiKey" placeholder="sk-... or gsk_..." />
+  <label>Endpoint</label>
+  <input id="chatBaseUrl" placeholder="https://api.groq.com/openai/v1" />
+  <button id="saveChatSettings">Save</button>
+  <div id="chatSettingsStatus"></div>
 </details>
 
 <details class="settings-block">

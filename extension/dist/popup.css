@@ -340,3 +340,12 @@ hr { margin: 10px 0; border: none; border-top: 1px solid #eee; }
   overflow-y: auto;
   scroll-behavior: smooth;
 }
+
+button.saving {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0.85;
+  cursor: default;
+}
