@@ -10,4 +10,6 @@ export interface StorageProvider {
 
     cleanup(userId: string): Promise<void>;
 
+    validate?(): Promise<void>;
+
 }

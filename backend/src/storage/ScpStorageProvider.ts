@@ -41,6 +41,65 @@ export class ScpStorageProvider implements StorageProvider {
         return sftp;
     }
 
+    async validate(): Promise<void> {
+        const sftp = await this.connect();
+
+        try {
+            const remotePath = this.config.remote_path;
+
+            // 1) بررسی وجود remote path
+            const exists = await sftp.exists(remotePath);
+
+            if (!exists) {
+                throw new Error(
+                    `Remote path does not exist: ${remotePath}`
+                );
+            }
+
+
+            // 2) تست permission با ساخت فایل موقت
+            const testFile =
+                `${remotePath}/.chatgpt_sftp_test_${Date.now()}`;
+
+            const testContent = "sftp permission test";
+
+            try {
+                await sftp.put(
+                    Buffer.from(testContent),
+                    testFile
+                );
+            } catch (err) {
+                throw new Error(
+                    "Permission denied: cannot write to remote path"
+                );
+            }
+
+
+            // 3) تست read
+            try {
+                await sftp.get(testFile);
+            } catch (err) {
+                throw new Error(
+                    "Permission denied: cannot read from remote path"
+                );
+            }
+
+
+            // 4) پاک کردن فایل تست
+            try {
+                await sftp.delete(testFile);
+            } catch (err) {
+                throw new Error(
+                    "Permission denied: cannot delete files in remote path"
+                );
+            }
+
+
+        } finally {
+            await sftp.end();
+        }
+    }
+
     // پاک کردن نسخه‌ی لوکال - هم قبل از دانلود (safety net) هم بعد از اتمام عملیات استفاده می‌شه
     private clearLocalTemp(userId: string) {
         const local = `${this.tempBase}/${userId}`;
