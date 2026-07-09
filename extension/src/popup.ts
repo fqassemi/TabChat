@@ -502,38 +502,64 @@ saveStorage.addEventListener(
     if (loading || !hasMore) return;
 
     loading = true;
+    setLoadMoreLoading(true);
 
-    const token = await getToken();
-    const apiKey = await getApiKeyForRequest();
+    try {
+      const token = await getToken();
+      const apiKey = await getApiKeyForRequest();
 
-    const res = await fetch(
-      `${SERVER}/tabs?limit=${limit}&offset=${offset}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const res = await fetch(
+        `${SERVER}/tabs?limit=${limit}&offset=${offset}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await res.json();
+
+      if (!data.ok) return;
+
+      const previousCount = allTabs.length;
+
+      if (reset) {
+        tabsList.innerHTML = "";
+        allTabs = [];
+        offset = 0;
       }
-    );
 
-    const data = await res.json();
+      allTabs = [...allTabs, ...data.tabs];
+      renderTabs(allTabs);
 
-    if (!data.ok) return;
+      offset += limit;
+      hasMore = data.hasMore;
 
-    if (reset) {
-      tabsList.innerHTML = "";
-      allTabs = [];
-      offset = 0;
+      // اسکرول به اولین آیتم جدید + هایلایت موقت، تا کاربر حس کنه چیزی لود شده
+      if (!reset && data.tabs.length > 0) {
+        const newItems = Array.from(
+          tabsList.querySelectorAll(".tab-item")
+        ).slice(previousCount);
+
+        newItems.forEach((el) => el.classList.add("new-item"));
+
+        newItems[0]?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
+    } finally {
+      loading = false;
+      setLoadMoreLoading(false);
+      renderLoadMore();
     }
+  }
 
-    allTabs = [...allTabs, ...data.tabs];
-    renderTabs(allTabs);
-
-    offset += limit;
-    hasMore = data.hasMore;
-
-    loading = false;
-
-    renderLoadMore();
+  function setLoadMoreLoading(isLoading: boolean) {
+    loadMoreBtn.disabled = isLoading;
+    loadMoreBtn.innerHTML = isLoading
+      ? `<span class="spinner"></span> Loading...`
+      : `Load more...`;
   }
 
 

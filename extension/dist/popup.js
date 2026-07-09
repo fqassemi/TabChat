@@ -363,27 +363,49 @@ document.addEventListener("DOMContentLoaded", () => {
         if (loading || !hasMore)
             return;
         loading = true;
-        const token = await getToken();
-        const apiKey = await getApiKeyForRequest();
-        const res = await fetch(`${SERVER}/tabs?limit=${limit}&offset=${offset}`, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-        const data = await res.json();
-        if (!data.ok)
-            return;
-        if (reset) {
-            tabsList.innerHTML = "";
-            allTabs = [];
-            offset = 0;
+        setLoadMoreLoading(true);
+        try {
+            const token = await getToken();
+            const apiKey = await getApiKeyForRequest();
+            const res = await fetch(`${SERVER}/tabs?limit=${limit}&offset=${offset}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            const data = await res.json();
+            if (!data.ok)
+                return;
+            const previousCount = allTabs.length;
+            if (reset) {
+                tabsList.innerHTML = "";
+                allTabs = [];
+                offset = 0;
+            }
+            allTabs = [...allTabs, ...data.tabs];
+            renderTabs(allTabs);
+            offset += limit;
+            hasMore = data.hasMore;
+            // اسکرول به اولین آیتم جدید + هایلایت موقت، تا کاربر حس کنه چیزی لود شده
+            if (!reset && data.tabs.length > 0) {
+                const newItems = Array.from(tabsList.querySelectorAll(".tab-item")).slice(previousCount);
+                newItems.forEach((el) => el.classList.add("new-item"));
+                newItems[0]?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                });
+            }
         }
-        allTabs = [...allTabs, ...data.tabs];
-        renderTabs(allTabs);
-        offset += limit;
-        hasMore = data.hasMore;
-        loading = false;
-        renderLoadMore();
+        finally {
+            loading = false;
+            setLoadMoreLoading(false);
+            renderLoadMore();
+        }
+    }
+    function setLoadMoreLoading(isLoading) {
+        loadMoreBtn.disabled = isLoading;
+        loadMoreBtn.innerHTML = isLoading
+            ? `<span class="spinner"></span> Loading...`
+            : `Load more...`;
     }
     function renderCloseTabsPrompt(docs) {
         const closable = docs.filter((d) => d.id);
