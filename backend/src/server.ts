@@ -600,6 +600,21 @@ app.post(
     } = req.body;
 
     try {
+       if (type === "scp") {
+         const { ScpStorageProvider } =
+             await import("./storage/ScpStorageProvider.ts");
+
+
+         const storage = new ScpStorageProvider({
+             host,
+             username,
+             password,
+             remote_path
+         });
+
+
+         await storage.validate();
+       }
 
       await saveUserStorage(
         userId,
