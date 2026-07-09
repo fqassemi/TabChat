@@ -1,14 +1,32 @@
 "use strict";
 // popup.ts
-const SERVER = "https://tabchat-production-f7d0.up.railway.app";
+const SERVER = "http://localhost:8000";
 const EXCLUDED_DOMAINS = [
-    "mail.google.com", // Gmail
-    "claude.ai", // Claude
-    "chat.openai.com", // ChatGPT
-    "chatgpt.com", // ChatGPT (دامنه جدید)
-    "gemini.google.com", // Gemini
-    "web.whatsapp.com", // WhatsApp Web
-    "chrome://", // صفحات داخلی کروم
+    // AI
+    "claude.ai",
+    "chat.openai.com",
+    "chatgpt.com",
+    "gemini.google.com",
+    "copilot.microsoft.com",
+    "perplexity.ai",
+    // Email
+    "mail.google.com",
+    "mail.yahoo.com",
+    "outlook.live.com",
+    "outlook.office.com",
+    "mail.proton.me",
+    "proton.me",
+    "mail.aol.com",
+    "icloud.com",
+    // Messaging
+    "web.whatsapp.com",
+    "discord.com",
+    "slack.com",
+    "teams.microsoft.com",
+    // Browser pages
+    "chrome://",
+    "edge://",
+    "about:",
 ];
 function isExcludedUrl(url) {
     try {
@@ -25,11 +43,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const openOverlayBtn = document.getElementById("openOverlay");
     const status = document.getElementById("status");
     const collectStatus = document.getElementById("collectStatus");
-    const openaiKeyInput = document.getElementById("openaiKey");
-    const saveApiKeyBtn = document.getElementById("saveApiKey");
-    const apiKeyStatus = document.getElementById("apiKeyStatus");
-    const apiKeyModeSelect = document.getElementById("apiKeyMode");
-    const customApiKeySettings = document.getElementById("customApiKeySettings");
+    const chatApiKeyInput = document.getElementById("chatApiKey");
+    const chatBaseUrlInput = document.getElementById("chatBaseUrl");
+    const saveChatBtn = document.getElementById("saveChatSettings");
+    const chatSettingsStatus = document.getElementById("chatSettingsStatus");
     const loginBtn = document.getElementById("loginBtn");
     const loginStatus = document.getElementById("loginStatus");
     const logoutBtn = document.getElementById("logoutBtn");
@@ -56,44 +73,63 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveStorage = document.getElementById("saveStorage");
     const storageStatus = document.getElementById("storageStatus");
     console.log("Popup loaded ✅");
-    // ------------------ LOAD API KEY MODE ------------------
-    chrome.storage.local.get(["openaiKey", "apiKeyMode"], (data) => {
-        const mode = data.apiKeyMode === "custom" ? "custom" : "default";
-        apiKeyModeSelect.value = mode;
-        customApiKeySettings.style.display = mode === "custom" ? "block" : "none";
-        if (data.openaiKey) {
-            openaiKeyInput.value = "********";
-        }
+    chrome.storage.local.get(["chatApiKey", "chatBaseUrl"], (data) => {
+        if (data.chatApiKey)
+            chatApiKeyInput.value = "********";
+        if (data.chatBaseUrl)
+            chatBaseUrlInput.value = data.chatBaseUrl;
     });
-    apiKeyModeSelect.addEventListener("change", () => {
-        customApiKeySettings.style.display =
-            apiKeyModeSelect.value === "custom" ? "block" : "none";
-    });
-    // ------------------ SAVE API KEY ------------------
-    saveApiKeyBtn.addEventListener("click", () => {
-        const mode = apiKeyModeSelect.value;
-        if (mode === "default") {
-            chrome.storage.local.set({ apiKeyMode: "default" }, () => {
-                chrome.storage.local.remove("openaiKey", () => {
-                    apiKeyStatus.textContent = "✅ Using our default API key.";
-                });
+    saveChatBtn.addEventListener("click", async () => {
+        const key = chatApiKeyInput.value.trim();
+        const baseUrl = chatBaseUrlInput.value.trim();
+        // حالت پیش‌فرض: کلید خالی یا ماسک‌شده → فقط پاک کن، نیازی به validation نیست
+        if (!key || key === "********") {
+            chrome.storage.local.remove(["chatApiKey", "chatBaseUrl"], () => {
+                chatSettingsStatus.textContent = "✅ Using our default AI provider.";
+                chatSettingsStatus.style.color = "#16a34a";
             });
             return;
         }
-        // mode === "custom"
-        const key = openaiKeyInput.value.trim();
-        if (!key || key === "********") {
-            apiKeyStatus.textContent = "❌ Please enter your API key.";
-            return;
+        setSavingState(true);
+        chatSettingsStatus.textContent = "";
+        try {
+            const res = await fetch(`${SERVER}/validate-provider`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ apiKey: key, baseURL: baseUrl || undefined }),
+            });
+            const data = await res.json();
+            if (!data.ok) {
+                chatSettingsStatus.textContent = data.error || "❌ Validation failed.";
+                chatSettingsStatus.style.color = "#dc2626";
+                return;
+            }
+            chrome.storage.local.set({ chatApiKey: key, chatBaseUrl: baseUrl }, () => {
+                chatSettingsStatus.textContent = `✅ Verified & saved.`;
+                chatSettingsStatus.style.color = "#16a34a";
+            });
         }
-        if (!key.startsWith("sk-")) {
-            apiKeyStatus.textContent = "❌ Invalid API key format.";
-            return;
+        catch (err) {
+            console.error("❌ Validation request failed:", err);
+            chatSettingsStatus.textContent = "❌ Could not reach validation server.";
+            chatSettingsStatus.style.color = "#dc2626";
         }
-        chrome.storage.local.set({ apiKeyMode: "custom", openaiKey: key }, () => {
-            apiKeyStatus.textContent = "✅ Your API key saved locally.";
-        });
+        finally {
+            setSavingState(false);
+        }
     });
+    function setSavingState(saving) {
+        saveChatBtn.disabled = saving;
+        saveChatBtn.classList.toggle("saving", saving);
+        saveChatBtn.innerHTML = saving
+            ? `<span class="spinner"></span> Verifying...`
+            : `Save`;
+    }
+    function getProviderSettings() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get(["chatApiKey", "chatBaseUrl"], (data) => resolve(data));
+        });
+    }
     // ------------------ LOGIN (FIXED FLOW) ------------------
     loginBtn.addEventListener("click", async () => {
         const redirectURL = chrome.identity.getRedirectURL("auth");
@@ -135,19 +171,6 @@ document.addEventListener("DOMContentLoaded", () => {
         return new Promise((resolve) => {
             chrome.storage.local.get(["token"], (data) => {
                 resolve(data.token ?? null);
-            });
-        });
-    }
-    // ------------------ GET API KEY (based on mode) ------------------
-    function getApiKeyForRequest() {
-        return new Promise((resolve) => {
-            chrome.storage.local.get(["apiKeyMode", "openaiKey"], (data) => {
-                if (data.apiKeyMode === "custom" && data.openaiKey) {
-                    resolve(data.openaiKey);
-                }
-                else {
-                    resolve(undefined);
-                }
             });
         });
     }
@@ -195,39 +218,60 @@ document.addEventListener("DOMContentLoaded", () => {
     saveStorage.addEventListener("click", async () => {
         const token = await getToken();
         if (!token) {
-            storageStatus.textContent =
-                "Please login.";
+            storageStatus.textContent = "❌ Please login first.";
+            storageStatus.style.color = "#dc2626";
             return;
         }
-        const res = await fetch(`${SERVER}/storage/config`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                type: storageType.value,
-                host: scpHost.value,
-                username: scpUsername.value,
-                password: scpPassword.value,
-                remote_path: scpRemotePath.value
-            })
-        });
-        const data = await res.json();
-        if (data.ok) {
-            storageStatus.textContent =
-                "Saved.";
+        setStorageSavingState(true);
+        storageStatus.textContent = "";
+        try {
+            const res = await fetch(`${SERVER}/storage/config`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    type: storageType.value,
+                    host: scpHost.value.trim(),
+                    username: scpUsername.value.trim(),
+                    password: scpPassword.value,
+                    remote_path: scpRemotePath.value.trim(),
+                }),
+            });
+            const data = await res.json();
+            if (data.ok) {
+                storageStatus.textContent =
+                    storageType.value === "scp"
+                        ? "✅ Connected & saved."
+                        : "✅ Saved.";
+                storageStatus.style.color = "#16a34a";
+            }
+            else {
+                storageStatus.textContent = data.error || "❌ Failed to save.";
+                storageStatus.style.color = "#dc2626";
+            }
         }
-        else {
-            storageStatus.textContent =
-                data.error;
+        catch (err) {
+            console.error("❌ Storage save request failed:", err);
+            storageStatus.textContent = "❌ Could not reach server.";
+            storageStatus.style.color = "#dc2626";
+        }
+        finally {
+            setStorageSavingState(false);
         }
     });
+    function setStorageSavingState(saving) {
+        saveStorage.disabled = saving;
+        saveStorage.innerHTML = saving
+            ? `<span class="spinner"></span> Connecting...`
+            : `Save`;
+    }
     // Collect tabs
     collect.addEventListener("click", async () => {
         document.getElementById("progressContainer").style.display = "block";
         collectStatus.textContent = "Collecting tabs...";
-        const apiKey = await getApiKeyForRequest();
+        const providerSettings = await getProviderSettings();
         const token = await getToken();
         if (!token) {
             collectStatus.textContent = "❌ Please login first.";
@@ -255,7 +299,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 },
                 body: JSON.stringify({
                     docs,
-                    apiKey,
+                    chatApiKey: providerSettings.chatApiKey,
+                    chatBaseURL: providerSettings.chatBaseUrl,
                 }),
             });
             const interval = setInterval(async () => {
@@ -366,8 +411,16 @@ document.addEventListener("DOMContentLoaded", () => {
         setLoadMoreLoading(true);
         try {
             const token = await getToken();
-            const apiKey = await getApiKeyForRequest();
-            const res = await fetch(`${SERVER}/tabs?limit=${limit}&offset=${offset}`, {
+            const providerSettings = await getProviderSettings();
+            const qs = new URLSearchParams({
+                limit: String(limit),
+                offset: String(offset),
+            });
+            if (providerSettings.chatApiKey)
+                qs.set("chatApiKey", providerSettings.chatApiKey);
+            if (providerSettings.chatBaseUrl)
+                qs.set("chatBaseURL", providerSettings.chatBaseUrl);
+            const res = await fetch(`${SERVER}/tabs?${qs.toString()}`, {
                 headers: {
                     Authorization: `Bearer ${token}`,
                 },
@@ -503,7 +556,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
                 const token = await getToken();
-                const apiKey = await getApiKeyForRequest();
+                const providerSettings = await getProviderSettings();
                 const res = await fetch(`${SERVER}/tabs`, {
                     method: "DELETE",
                     headers: {
@@ -512,7 +565,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     },
                     body: JSON.stringify({
                         url: tab.url,
-                        apiKey,
+                        chatApiKey: providerSettings.chatApiKey,
+                        chatBaseURL: providerSettings.chatBaseUrl,
                     }),
                 });
                 const data = await res.json();

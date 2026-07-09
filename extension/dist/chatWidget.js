@@ -8,14 +8,6 @@
         return /[\u0600-\u06FF]/.test(text);
     }
     async function injectChatWidget() {
-        const apiKey = await new Promise((resolve) => chrome.storage.local.get(["openaiKey", "apiKeyMode"], (data) => {
-            if (data.apiKeyMode === "custom" && typeof data.openaiKey === "string") {
-                resolve(data.openaiKey);
-            }
-            else {
-                resolve(undefined);
-            }
-        }));
         if (document.getElementById("chat-widget"))
             return;
         // ===== STYLE =====
@@ -378,14 +370,18 @@
             sendBtn.disabled = true;
             showTyping();
             try {
-                const storage = await chrome.storage.local.get(["token", "openaiKey"]);
+                const storage = await chrome.storage.local.get([
+                    "token",
+                    "chatApiKey",
+                    "chatBaseUrl",
+                ]);
                 const token = storage.token;
                 if (!token) {
                     hideTyping();
                     addMessage("❌ Please login first.", false);
                     return;
                 }
-                const response = await fetch("https://tabchat-production-f7d0.up.railway.app/chat", {
+                const response = await fetch("http://localhost:8000/chat", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -393,8 +389,9 @@
                     },
                     body: JSON.stringify({
                         question,
-                        apiKey,
                         url: window.location.href,
+                        chatApiKey: storage.chatApiKey,
+                        chatBaseURL: storage.chatBaseUrl,
                     }),
                 });
                 const data = await response.json();

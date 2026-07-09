@@ -284,15 +284,12 @@ function openSearchOverlay(): void {
       <div class="skeleton"></div>
     `;
 
-    const settingsData = await chrome.storage.local.get(["openaiKey", "apiKeyMode"]);
-    const apiKey =
-      settingsData.apiKeyMode === "custom"
-        ? (settingsData.openaiKey as string | undefined)
-        : undefined;
-
-
     try {
-  const storage = await chrome.storage.local.get(["token", "openaiKey",]);
+  const storage = await chrome.storage.local.get([
+      "token",
+      "chatApiKey",
+      "chatBaseUrl",
+  ]);
   const token = storage.token;
 
   if (!token) {
@@ -309,9 +306,10 @@ function openSearchOverlay(): void {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      q,
-      apiKey,
-    }),
+          q,
+          chatApiKey: storage.chatApiKey,
+          chatBaseURL: storage.chatBaseUrl,
+        }),
   });
 
   const j = await r.json();
