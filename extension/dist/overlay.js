@@ -286,7 +286,7 @@ function openSearchOverlay() {
       `;
                 return;
             }
-            const r = await fetch("http://localhost:8000/search", {
+            const r = await fetch("https://tabchat-production-f7d0.up.railway.app/search", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
