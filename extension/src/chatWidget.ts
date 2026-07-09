@@ -8,10 +8,13 @@
   }
 
   async function injectChatWidget() {
-    const apiKey: string = await new Promise((resolve) =>
-      chrome.storage.local.get(["openaiKey"], (data) => {
-        const key = data.openaiKey;
-        resolve(typeof key === "string" ? key : "");
+    const apiKey: string | undefined = await new Promise((resolve) =>
+      chrome.storage.local.get(["openaiKey", "apiKeyMode"], (data) => {
+        if (data.apiKeyMode === "custom" && typeof data.openaiKey === "string") {
+          resolve(data.openaiKey);
+        } else {
+          resolve(undefined);
+        }
       })
     );
 

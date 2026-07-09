@@ -284,8 +284,11 @@ function openSearchOverlay(): void {
       <div class="skeleton"></div>
     `;
 
-    const data = await chrome.storage.local.get(["openaiKey"]);
-    const apiKey = data.openaiKey as string | undefined;
+    const settingsData = await chrome.storage.local.get(["openaiKey", "apiKeyMode"]);
+    const apiKey =
+      settingsData.apiKeyMode === "custom"
+        ? (settingsData.openaiKey as string | undefined)
+        : undefined;
 
 
     try {

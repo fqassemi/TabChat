@@ -28,6 +28,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const openaiKeyInput = document.getElementById("openaiKey");
     const saveApiKeyBtn = document.getElementById("saveApiKey");
     const apiKeyStatus = document.getElementById("apiKeyStatus");
+    const apiKeyModeSelect = document.getElementById("apiKeyMode");
+    const customApiKeySettings = document.getElementById("customApiKeySettings");
     const loginBtn = document.getElementById("loginBtn");
     const loginStatus = document.getElementById("loginStatus");
     const logoutBtn = document.getElementById("logoutBtn");
@@ -54,28 +56,42 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveStorage = document.getElementById("saveStorage");
     const storageStatus = document.getElementById("storageStatus");
     console.log("Popup loaded ✅");
-    // ------------------ LOAD API KEY ------------------
-    chrome.storage.local.get(["openaiKey"], (data) => {
+    // ------------------ LOAD API KEY MODE ------------------
+    chrome.storage.local.get(["openaiKey", "apiKeyMode"], (data) => {
+        const mode = data.apiKeyMode === "custom" ? "custom" : "default";
+        apiKeyModeSelect.value = mode;
+        customApiKeySettings.style.display = mode === "custom" ? "block" : "none";
         if (data.openaiKey) {
             openaiKeyInput.value = "********";
         }
     });
+    apiKeyModeSelect.addEventListener("change", () => {
+        customApiKeySettings.style.display =
+            apiKeyModeSelect.value === "custom" ? "block" : "none";
+    });
     // ------------------ SAVE API KEY ------------------
     saveApiKeyBtn.addEventListener("click", () => {
-        const key = openaiKeyInput.value.trim();
-        if (!key) {
-            chrome.storage.local.remove("openaiKey", () => {
-                apiKeyStatus.textContent =
-                    "✅ Using default server API key.";
+        const mode = apiKeyModeSelect.value;
+        if (mode === "default") {
+            chrome.storage.local.set({ apiKeyMode: "default" }, () => {
+                chrome.storage.local.remove("openaiKey", () => {
+                    apiKeyStatus.textContent = "✅ Using our default API key.";
+                });
             });
+            return;
+        }
+        // mode === "custom"
+        const key = openaiKeyInput.value.trim();
+        if (!key || key === "********") {
+            apiKeyStatus.textContent = "❌ Please enter your API key.";
             return;
         }
         if (!key.startsWith("sk-")) {
             apiKeyStatus.textContent = "❌ Invalid API key format.";
             return;
         }
-        chrome.storage.local.set({ openaiKey: key }, () => {
-            apiKeyStatus.textContent = "✅ API key saved locally.";
+        chrome.storage.local.set({ apiKeyMode: "custom", openaiKey: key }, () => {
+            apiKeyStatus.textContent = "✅ Your API key saved locally.";
         });
     });
     // ------------------ LOGIN (FIXED FLOW) ------------------
@@ -119,6 +135,19 @@ document.addEventListener("DOMContentLoaded", () => {
         return new Promise((resolve) => {
             chrome.storage.local.get(["token"], (data) => {
                 resolve(data.token ?? null);
+            });
+        });
+    }
+    // ------------------ GET API KEY (based on mode) ------------------
+    function getApiKeyForRequest() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get(["apiKeyMode", "openaiKey"], (data) => {
+                if (data.apiKeyMode === "custom" && data.openaiKey) {
+                    resolve(data.openaiKey);
+                }
+                else {
+                    resolve(undefined);
+                }
             });
         });
     }
@@ -198,12 +227,7 @@ document.addEventListener("DOMContentLoaded", () => {
     collect.addEventListener("click", async () => {
         document.getElementById("progressContainer").style.display = "block";
         collectStatus.textContent = "Collecting tabs...";
-        const apiKey = await new Promise((resolve) => {
-            chrome.storage.local.get(["openaiKey"], (data) => {
-                const typed = data;
-                resolve(typed.openaiKey);
-            });
-        });
+        const apiKey = await getApiKeyForRequest();
         const token = await getToken();
         if (!token) {
             collectStatus.textContent = "❌ Please login first.";
@@ -339,27 +363,49 @@ document.addEventListener("DOMContentLoaded", () => {
         if (loading || !hasMore)
             return;
         loading = true;
-        const token = await getToken();
-        const { openaiKey } = (await chrome.storage.local.get(["openaiKey"]));
-        const res = await fetch(`${SERVER}/tabs?limit=${limit}&offset=${offset}`, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-        const data = await res.json();
-        if (!data.ok)
-            return;
-        if (reset) {
-            tabsList.innerHTML = "";
-            allTabs = [];
-            offset = 0;
+        setLoadMoreLoading(true);
+        try {
+            const token = await getToken();
+            const apiKey = await getApiKeyForRequest();
+            const res = await fetch(`${SERVER}/tabs?limit=${limit}&offset=${offset}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            const data = await res.json();
+            if (!data.ok)
+                return;
+            const previousCount = allTabs.length;
+            if (reset) {
+                tabsList.innerHTML = "";
+                allTabs = [];
+                offset = 0;
+            }
+            allTabs = [...allTabs, ...data.tabs];
+            renderTabs(allTabs);
+            offset += limit;
+            hasMore = data.hasMore;
+            // اسکرول به اولین آیتم جدید + هایلایت موقت، تا کاربر حس کنه چیزی لود شده
+            if (!reset && data.tabs.length > 0) {
+                const newItems = Array.from(tabsList.querySelectorAll(".tab-item")).slice(previousCount);
+                newItems.forEach((el) => el.classList.add("new-item"));
+                newItems[0]?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                });
+            }
         }
-        allTabs = [...allTabs, ...data.tabs];
-        renderTabs(allTabs);
-        offset += limit;
-        hasMore = data.hasMore;
-        loading = false;
-        renderLoadMore();
+        finally {
+            loading = false;
+            setLoadMoreLoading(false);
+            renderLoadMore();
+        }
+    }
+    function setLoadMoreLoading(isLoading) {
+        loadMoreBtn.disabled = isLoading;
+        loadMoreBtn.innerHTML = isLoading
+            ? `<span class="spinner"></span> Loading...`
+            : `Load more...`;
     }
     function renderCloseTabsPrompt(docs) {
         const closable = docs.filter((d) => d.id);
@@ -457,7 +503,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
                 const token = await getToken();
-                const { openaiKey } = await chrome.storage.local.get(["openaiKey"]);
+                const apiKey = await getApiKeyForRequest();
                 const res = await fetch(`${SERVER}/tabs`, {
                     method: "DELETE",
                     headers: {
@@ -466,7 +512,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     },
                     body: JSON.stringify({
                         url: tab.url,
-                        apiKey: openaiKey || undefined,
+                        apiKey,
                     }),
                 });
                 const data = await res.json();
