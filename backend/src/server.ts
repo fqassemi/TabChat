@@ -247,6 +247,19 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
 
           if ((buffer + "\n\n" + trimmed).length > maxLen) {
             if (buffer.trim().length > 30) chunks.push(buffer.trim());
+            if (trimmed.length > maxLen) {
+                if (buffer.trim()) {
+                    chunks.push(buffer.trim());
+                    buffer = "";
+                }
+
+                for (let i = 0; i < trimmed.length; i += maxLen) {
+                    chunks.push(trimmed.slice(i, i + maxLen));
+                }
+
+                continue;
+            }
+
             buffer = trimmed;
           } else {
             buffer += (buffer ? "\n\n" : "") + trimmed;
