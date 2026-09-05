@@ -164,19 +164,24 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   try {
+    console.log("🗑️ Tab closed:", tabId);
+
     const url = await getTabUrl(tabId);
 
-    console.log("🗑️ Tab closed:", {
-      tabId,
-      url,
-    });
+    console.log("🔎 URL found for closed tab:", url);
 
     await removeTabUrl(tabId);
+
+    console.log("✅ Tab mapping removed:", tabId);
 
     if (!url) {
       console.log("⚠️ No URL found for closed tab:", tabId);
       return;
     }
+
+    const openTabs = await chrome.tabs.query({});
+
+    console.log("🔍 Checking remaining open tabs...");
 
     const normalizeUrl = (value) => {
       if (!value) {
@@ -197,8 +202,6 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
     const closedUrl = normalizeUrl(url);
 
-    const openTabs = await chrome.tabs.query({});
-
     const sameUrlStillOpen = openTabs.some((tab) => {
       if (!tab.url) {
         return false;
@@ -216,11 +219,19 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
       return;
     }
 
+    console.log("🧹 No duplicate tab found. Starting backend cleanup...");
+
     const result = await chrome.storage.local.get([
       "token",
       "chatApiKey",
       "chatBaseUrl",
     ]);
+
+    console.log("🔐 Auth data loaded:", {
+      hasToken: !!result.token,
+      hasChatApiKey: !!result.chatApiKey,
+      hasChatBaseUrl: !!result.chatBaseUrl,
+    });
 
     const token = result.token;
 
@@ -228,6 +239,8 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
       console.log("⚠️ No auth token found. Cleanup skipped.");
       return;
     }
+
+    console.log("🚀 Sending DELETE /tabs:", url);
 
     const response = await fetch("http://localhost:8000/tabs", {
       method: "DELETE",
@@ -242,17 +255,18 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
       }),
     });
 
+    console.log("📡 Backend response status:", response.status);
+
     const data = await response.json();
+
+    console.log("📦 Backend response:", data);
 
     if (!response.ok) {
       console.error("❌ Tab cleanup failed:", data);
       return;
     }
 
-    console.log("✅ Closed tab cleaned up:", {
-      url,
-      response: data,
-    });
+    console.log("✅ Closed tab cleaned up successfully:", url);
   } catch (err) {
     console.error("❌ Failed to handle closed tab:", err);
   }
