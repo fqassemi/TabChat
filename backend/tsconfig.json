@@ -1,28 +1,26 @@
 {
   "compilerOptions": {
-    // مسیر فایل‌های اصلی و خروجی
     "rootDir": "src",
     "outDir": "dist",
 
-    // تنظیمات ماژول و خروجی JS
-    "module": "esnext",
-    "moduleResolution": "node",
-    "target": "es2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
 
-    // بررسی سختگیرانه TypeScript
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
 
-    // برای دیباگ و توسعه
     "sourceMap": true,
     "skipLibCheck": true,
     "isolatedModules": true,
 
-    // انواع تایپ‌ها
     "types": ["node", "express"]
   },
-  "include": ["src"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

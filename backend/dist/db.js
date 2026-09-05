@@ -1,27 +1,15 @@
-import Database from "better-sqlite3";
-let db;
-export function initDb() {
-    db = new Database("tabs.db");
-    db.exec(`CREATE TABLE IF NOT EXISTS pages (
-    id TEXT PRIMARY KEY,
-    title TEXT,
-    url TEXT,
-    text TEXT,
-    fetched_at TEXT
-  )`);
-}
-export function insertDocs(docs) {
-    const insert = db.prepare("INSERT OR REPLACE INTO pages (id,title,url,fetched_at) VALUES (@id,@title,@url,@fetched_at)");
-    const now = new Date().toISOString();
-    let count = 0;
-    const insertTxn = db.transaction((rows) => {
-        for (const d of rows) {
-            const id = `${Buffer.from(d.url).toString("base64")}`; // ساده؛ یا uuid
-            insert.run({ id, title: d.title, url: d.url, fetched_at: now });
-            count++;
-        }
-    });
-    insertTxn(docs);
-    return count;
-}
+import { Pool } from "pg";
+export const pool = new Pool({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT),
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+});
+pool.on("connect", () => {
+    console.log("✅ Connected to PostgreSQL");
+});
+pool.on("error", (err) => {
+    console.error("❌ PostgreSQL Error:", err);
+});
 //# sourceMappingURL=db.js.map
