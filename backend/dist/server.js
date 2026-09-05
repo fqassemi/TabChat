@@ -496,30 +496,59 @@ app.get("/tabs", requireAuth, async (req, res) => {
     });
 });
 // ------------------ Delete Tab ------------------
+// ------------------ Delete Tab ------------------
+
 app.delete("/tabs", requireAuth, async (req, res) => {
     const { url, chatApiKey, chatBaseURL } = req.body;
     const userId = req.userId;
+
     if (!url) {
-        return res.status(400).json({ ok: false, error: "Missing url" });
+        return res.status(400).json({
+            ok: false,
+            error: "Missing url",
+        });
     }
+
     const { embedding: embeddingConfig } = resolveProviders({
         apiKey: chatApiKey,
         baseURL: chatBaseURL,
     });
+
     await runExclusive(userId, async () => {
         const engine = await getFaissEngine(userId);
+
         try {
-            await engine.deleteByUrl(userId, embeddingConfig, url);
+            // 1. حذف chunkهایی که هنوز در pending هستند
+            await engine.deletePendingByUrl(userId, url);
+
+            // 2. حذف vectorهای مربوط به URL از FAISS
+            await engine.deleteByUrl(
+                userId,
+                embeddingConfig,
+                url
+            );
+
+            // 3. حذف metadata مربوط به tab
             await engine.deleteTab(userId, url);
+
+            // 4. حذف URL از metadata
             await engine.deleteUrl(userId, url);
+
+            // 5. Sync storage
             await engine.syncStorage(userId);
-            res.json({ ok: true, message: "Tab deleted successfully." });
-        }
-        catch (err) {
+
+            res.json({
+                ok: true,
+                message: "Tab deleted successfully.",
+            });
+        } catch (err) {
             console.error("Delete tab error:", err);
-            res.status(500).json({ ok: false, error: err.message });
-        }
-        finally {
+
+            res.status(500).json({
+                ok: false,
+                error: err.message,
+            });
+        } finally {
             if (engine.isTemporary()) {
                 await engine.cleanup(userId);
             }

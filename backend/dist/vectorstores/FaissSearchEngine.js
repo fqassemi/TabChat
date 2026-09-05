@@ -273,6 +273,41 @@ export class FaissSearchEngine {
             ?? path.join(this.basePath, userId);
         return path.join(path.dirname(base), `${userId}-pending.json`);
     }
+
+
+    async deletePendingByUrl(userId, url) {
+    const file = await this.getPendingPath(userId);
+
+    if (!fs.existsSync(file)) {
+        return 0;
+    }
+
+    const target = this.normalizeUrl(url);
+
+    const pending = JSON.parse(
+        fs.readFileSync(file, "utf8")
+    );
+
+    const filtered = pending.filter(
+        (chunk) =>
+            this.normalizeUrl(chunk.metadata?.url) !== target
+    );
+
+    if (filtered.length !== pending.length) {
+        fs.writeFileSync(
+            file,
+            JSON.stringify(filtered, null, 2)
+        );
+    }
+
+    const deletedCount = pending.length - filtered.length;
+
+    console.log(
+        `🧹 Deleted ${deletedCount} pending chunks for URL: ${url}`
+    );
+
+    return deletedCount;
+}
     async savePendingChunks(userId, chunks) {
         const file = await this.getPendingPath(userId);
         const dir = path.dirname(file);
