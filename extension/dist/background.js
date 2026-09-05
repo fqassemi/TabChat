@@ -8,7 +8,7 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== "pin-this") {
     return;
   }
@@ -20,6 +20,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 
   const pin = {
+    id: crypto.randomUUID(),
     text: selectedText,
     url: tab.url,
     title: tab.title || "Untitled",
@@ -27,34 +28,50 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     timestamp: new Date().toISOString(),
   };
 
-  console.log("📌 Pin created:", pin);
-});
+  try {
+    const result = await chrome.storage.local.get("pins");
 
-chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-  if (msg.type === "chatQuery") {
-    try {
-      const r = await fetch("http://localhost:8000/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          url: msg.url,
-          question: msg.question,
-        }),
-      });
+    const pins = result.pins || [];
 
-      const j = await r.json();
+    pins.push(pin);
 
-      sendResponse(j);
-    } catch (err) {
-      console.error("❌ Chat error:", err);
+    await chrome.storage.local.set({
+      pins,
+    });
 
-      sendResponse({
-        answer: "Error talking to server.",
-      });
-    }
+    console.log("📌 Pin saved:", pin);
+  } catch (err) {
+    console.error("❌ Failed to save pin:", err);
   }
-
-  return true;
 });
+
+chrome.runtime.onMessage.addListener(
+  async (msg, sender, sendResponse) => {
+    if (msg.type === "chatQuery") {
+      try {
+        const r = await fetch("http://localhost:8000/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            url: msg.url,
+            question: msg.question,
+          }),
+        });
+
+        const j = await r.json();
+
+        sendResponse(j);
+      } catch (err) {
+        console.error("❌ Chat error:", err);
+
+        sendResponse({
+          answer: "Error talking to server.",
+        });
+      }
+    }
+
+    return true;
+  }
+);
