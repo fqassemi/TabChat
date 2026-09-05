@@ -1,5 +1,4 @@
 
-
 const OPEN_TABS_KEY = "openTabUrls";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -11,7 +10,6 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ["selection"],
   });
 });
-
 
 // =========================
 // 📌 Pin
@@ -54,7 +52,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
-
 // =========================
 // 💬 Chat
 // =========================
@@ -90,7 +87,6 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
-
 // =========================
 // 🗂️ Open Tabs Tracking
 // =========================
@@ -111,7 +107,6 @@ async function saveTabUrl(tabId, url) {
   });
 }
 
-
 async function getTabUrl(tabId) {
   const result = await chrome.storage.local.get(OPEN_TABS_KEY);
 
@@ -119,7 +114,6 @@ async function getTabUrl(tabId) {
 
   return openTabUrls[String(tabId)] || null;
 }
-
 
 async function removeTabUrl(tabId) {
   const result = await chrome.storage.local.get(OPEN_TABS_KEY);
@@ -132,7 +126,6 @@ async function removeTabUrl(tabId) {
     [OPEN_TABS_KEY]: openTabUrls,
   });
 }
-
 
 // =========================
 // 🔄 Tab Updated
@@ -156,7 +149,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     console.error("❌ Failed to save tab URL:", err);
   }
 });
-
 
 // =========================
 // 🗑️ Tab Closed
@@ -233,7 +225,18 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
       hasChatBaseUrl: !!result.chatBaseUrl,
     });
 
+    // =========================
+    // 🔍 Debug
+    // =========================
+
+    console.log("🟢 Before token extraction");
+
     const token = result.token;
+
+    console.log("🟢 Before fetch:", {
+      hasToken: !!token,
+      url,
+    });
 
     if (!token) {
       console.log("⚠️ No auth token found. Cleanup skipped.");
@@ -242,12 +245,18 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
     console.log("🚀 Sending DELETE /tabs:", url);
 
+    // =========================
+    // 🧹 Backend Cleanup
+    // =========================
+
     const response = await fetch("http://localhost:8000/tabs", {
       method: "DELETE",
+
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
+
       body: JSON.stringify({
         url,
         chatApiKey: result.chatApiKey,
