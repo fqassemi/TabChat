@@ -1,3 +1,7 @@
+
+
+const OPEN_TABS_KEY = "openTabUrls";
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("TabChat installed");
 
@@ -7,6 +11,11 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ["selection"],
   });
 });
+
+
+// =========================
+// 📌 Pin
+// =========================
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== "pin-this") {
@@ -45,6 +54,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+
+// =========================
+// 💬 Chat
+// =========================
+
 chrome.runtime.onMessage.addListener(
   async (msg, sender, sendResponse) => {
     if (msg.type === "chatQuery") {
@@ -75,3 +89,171 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 );
+
+
+// =========================
+// 🗂️ Open Tabs Tracking
+// =========================
+
+async function saveTabUrl(tabId, url) {
+  if (tabId == null || !url) {
+    return;
+  }
+
+  const result = await chrome.storage.local.get(OPEN_TABS_KEY);
+
+  const openTabUrls = result[OPEN_TABS_KEY] || {};
+
+  openTabUrls[String(tabId)] = url;
+
+  await chrome.storage.local.set({
+    [OPEN_TABS_KEY]: openTabUrls,
+  });
+}
+
+
+async function getTabUrl(tabId) {
+  const result = await chrome.storage.local.get(OPEN_TABS_KEY);
+
+  const openTabUrls = result[OPEN_TABS_KEY] || {};
+
+  return openTabUrls[String(tabId)] || null;
+}
+
+
+async function removeTabUrl(tabId) {
+  const result = await chrome.storage.local.get(OPEN_TABS_KEY);
+
+  const openTabUrls = result[OPEN_TABS_KEY] || {};
+
+  delete openTabUrls[String(tabId)];
+
+  await chrome.storage.local.set({
+    [OPEN_TABS_KEY]: openTabUrls,
+  });
+}
+
+
+// =========================
+// 🔄 Tab Updated
+// =========================
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  const url = changeInfo.url || tab.url;
+
+  if (!url) {
+    return;
+  }
+
+  try {
+    await saveTabUrl(tabId, url);
+
+    console.log("🗂️ Tab URL saved:", {
+      tabId,
+      url,
+    });
+  } catch (err) {
+    console.error("❌ Failed to save tab URL:", err);
+  }
+});
+
+
+// =========================
+// 🗑️ Tab Closed
+// =========================
+
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  try {
+    const url = await getTabUrl(tabId);
+
+    console.log("🗑️ Tab closed:", {
+      tabId,
+      url,
+    });
+
+    await removeTabUrl(tabId);
+
+    if (!url) {
+      console.log("⚠️ No URL found for closed tab:", tabId);
+      return;
+    }
+
+    const normalizeUrl = (value) => {
+      if (!value) {
+        return "";
+      }
+
+      try {
+        const parsed = new URL(value);
+
+        parsed.search = "";
+        parsed.hash = "";
+
+        return parsed.toString().replace(/\/$/, "").toLowerCase();
+      } catch {
+        return value.toLowerCase().replace(/\/$/, "");
+      }
+    };
+
+    const closedUrl = normalizeUrl(url);
+
+    const openTabs = await chrome.tabs.query({});
+
+    const sameUrlStillOpen = openTabs.some((tab) => {
+      if (!tab.url) {
+        return false;
+      }
+
+      return normalizeUrl(tab.url) === closedUrl;
+    });
+
+    if (sameUrlStillOpen) {
+      console.log(
+        "ℹ️ Same URL is still open in another tab. Cleanup skipped:",
+        url
+      );
+
+      return;
+    }
+
+    const result = await chrome.storage.local.get([
+      "token",
+      "chatApiKey",
+      "chatBaseUrl",
+    ]);
+
+    const token = result.token;
+
+    if (!token) {
+      console.log("⚠️ No auth token found. Cleanup skipped.");
+      return;
+    }
+
+    const response = await fetch("http://localhost:8000/tabs", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        url,
+        chatApiKey: result.chatApiKey,
+        chatBaseURL: result.chatBaseUrl,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("❌ Tab cleanup failed:", data);
+      return;
+    }
+
+    console.log("✅ Closed tab cleaned up:", {
+      url,
+      response: data,
+    });
+  } catch (err) {
+    console.error("❌ Failed to handle closed tab:", err);
+  }
+});
