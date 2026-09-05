@@ -2,6 +2,10 @@ import fs from "fs";
 import path from "path";
 import { FaissStore } from "@langchain/community/vectorstores/faiss";
 import { OpenAIEmbeddings } from "@langchain/openai";
+
+
+
+
 export class FaissSearchEngine {
     constructor(basePath = "./data/faiss", storage) {
         this.stores = new Map();
@@ -90,10 +94,12 @@ export class FaissSearchEngine {
         const texts = docs.map((d) => d.text);
         const metadatas = docs.map((d) => ({
             userId,
+            type: "document",
             title: d.metadata?.title || "Untitled",
             url: d.metadata?.url || "",
             part: d.metadata?.part || 1,
         }));
+
         try {
             const newStore = await FaissStore.fromTexts(texts, metadatas, this.embedder);
             store.mergeFrom(newStore);
@@ -184,7 +190,10 @@ export class FaissSearchEngine {
         const target = this.normalizeUrl(url);
         const ids = [];
         for (const [id, doc] of docstore._docs.entries()) {
-            if (this.normalizeUrl(doc.metadata?.url) === target) {
+            if (
+                doc.metadata?.type !== "pin" &&
+                this.normalizeUrl(doc.metadata?.url) === target
+            ) {
                 ids.push(id);
             }
         }
@@ -218,17 +227,23 @@ export class FaissSearchEngine {
             }
             let docs = results
                 .filter(([doc]) => doc.pageContent !== "init" &&
-                doc.metadata?.meta !== "init")
+                    doc.metadata?.meta !== "init")
                 .map(([doc, score]) => ({
-                text: doc.pageContent,
-                metadata: {
-                    userId: doc.metadata?.userId,
-                    title: doc.metadata?.title || "Untitled",
-                    url: doc.metadata?.url || "",
-                    part: doc.metadata?.part || 1,
-                },
-                score,
-            }));
+                    text: doc.pageContent,
+                    metadata: {
+                        userId: doc.metadata?.userId,
+                        type: doc.metadata?.type || "document",
+                        pinId: doc.metadata?.pinId,
+                        title: doc.metadata?.title || "Untitled",
+                        url: doc.metadata?.url || "",
+                        part: doc.metadata?.part || 1,
+                        tabId: doc.metadata?.tabId,
+                        timestamp: doc.metadata?.timestamp,
+                    },
+
+
+                    score,
+                }));
             // Optional URL filter
             if (url) {
                 const target = this.normalizeUrl(url);
@@ -284,5 +299,103 @@ export class FaissSearchEngine {
     async prepareStorage(userId) {
         await this.storage?.beforeLoad(userId);
     }
+
+    async getPinsPath(userId) {
+        const base =
+            await this.storage?.getLocalPath(userId)
+            ?? path.join(this.basePath, userId);
+
+        return path.join(
+            path.dirname(base),
+            `${userId}-pins.json`
+        );
+    }
+
+    async getPins(userId) {
+        const file = await this.getPinsPath(userId);
+
+        if (!fs.existsSync(file)) {
+            return [];
+        }
+
+        return JSON.parse(
+            fs.readFileSync(file, "utf8")
+        );
+    }
+
+    async savePin(userId, pin) {
+        const file = await this.getPinsPath(userId);
+        const dir = path.dirname(file);
+
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+
+        const pins = await this.getPins(userId);
+
+        pins.push(pin);
+
+        fs.writeFileSync(
+            file,
+            JSON.stringify(pins, null, 2)
+        );
+    }
+
+    async deletePin(userId, pinId) {
+        const file = await this.getPinsPath(userId);
+
+        if (!fs.existsSync(file)) {
+            return;
+        }
+
+        const pins = await this.getPins(userId);
+
+        const filtered = pins.filter(
+            (pin) => pin.id !== pinId
+        );
+
+        fs.writeFileSync(
+            file,
+            JSON.stringify(filtered, null, 2)
+        );
+    }
+    async addPinToIndex(userId, config, pin) {
+        await this.init(config, userId);
+
+        const store = this.stores.get(userId);
+
+        if (!store) {
+            throw new Error(
+                `FAISS store not initialized for user ${userId}`
+            );
+        }
+
+        const metadata = {
+            userId,
+            type: "pin",
+            pinId: pin.id,
+            title: pin.title,
+            url: pin.url,
+            tabId: pin.tabId,
+            timestamp: pin.timestamp,
+        };
+
+        const newStore = await FaissStore.fromTexts(
+            [pin.text],
+            [metadata],
+            this.embedder
+        );
+
+        store.mergeFrom(newStore);
+
+        await store.save(
+            await this.getUserPath(userId)
+        );
+
+        await this.storage?.afterSave(userId);
+    }
+
+
+
 }
 //# sourceMappingURL=FaissSearchEngine.js.map
