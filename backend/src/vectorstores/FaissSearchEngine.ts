@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
+
 import { FaissStore } from "@langchain/community/vectorstores/faiss";
 import { OpenAIEmbeddings } from "@langchain/openai";
+
 import type { StorageProvider } from "../storage/StorageProvider.ts";
 
 export type EmbeddingConfig = {
@@ -12,9 +14,13 @@ export type EmbeddingConfig = {
 
 export class FaissSearchEngine {
   private basePath: string;
+
   private stores: Map<string, FaissStore> = new Map();
+
   private embedder: OpenAIEmbeddings | null = null;
+
   private initPromises: Map<string, Promise<void>> = new Map();
+
   private storage?: StorageProvider;
 
   constructor(
@@ -30,10 +36,7 @@ export class FaissSearchEngine {
       return await this.storage.getLocalPath(userId);
     }
 
-    return path.join(
-      this.basePath,
-      userId
-    );
+    return path.join(this.basePath, userId);
   }
 
   async init(
@@ -49,7 +52,9 @@ export class FaissSearchEngine {
         apiKey: config.apiKey,
         model: config.model,
         configuration: config.baseURL
-          ? { baseURL: config.baseURL }
+          ? {
+              baseURL: config.baseURL,
+            }
           : undefined,
       });
     }
@@ -61,8 +66,7 @@ export class FaissSearchEngine {
       return;
     }
 
-    const existing =
-      this.initPromises.get(userId);
+    const existing = this.initPromises.get(userId);
 
     if (existing) {
       return existing;
@@ -98,9 +102,7 @@ export class FaissSearchEngine {
       this.stores.delete(userId);
     }
 
-    await this.storage?.beforeLoad(
-      userId
-    );
+    await this.storage?.beforeLoad(userId);
 
     const userPath =
       await this.getUserPath(userId);
@@ -142,7 +144,11 @@ export class FaissSearchEngine {
         const store =
           await FaissStore.fromTexts(
             ["init"],
-            [{ meta: "init" }],
+            [
+              {
+                meta: "init",
+              },
+            ],
             this.embedder!
           );
 
@@ -168,7 +174,11 @@ export class FaissSearchEngine {
       const store =
         await FaissStore.fromTexts(
           ["init"],
-          [{ meta: "init" }],
+          [
+            {
+              meta: "init",
+            },
+          ],
           this.embedder!
         );
 
@@ -223,17 +233,22 @@ export class FaissSearchEngine {
       docs.map(
         (d) => ({
           userId,
+
           title:
             d.metadata?.title ||
             "Untitled",
+
           url:
             d.metadata?.url ||
             "",
+
           part:
             d.metadata?.part ||
             1,
+
           tabId:
             d.metadata?.tabId,
+
           windowId:
             d.metadata?.windowId,
         })
@@ -269,6 +284,8 @@ export class FaissSearchEngine {
         "❌ Failed to sync FAISS index:",
         err
       );
+
+      throw err;
     }
   }
 
@@ -302,17 +319,31 @@ export class FaissSearchEngine {
       return new Set();
     }
 
-    const json =
-      JSON.parse(
-        fs.readFileSync(
-          file,
-          "utf8"
-        )
+    try {
+      const json =
+        JSON.parse(
+          fs.readFileSync(
+            file,
+            "utf8"
+          )
+        );
+
+      return new Set(
+        (json.urls || [])
+          .map(
+            (url: string) =>
+              this.normalizeUrl(url)
+          )
+          .filter(Boolean)
+      );
+    } catch (err) {
+      console.error(
+        "❌ Failed reading URL metadata:",
+        err
       );
 
-    return new Set(
-      json.urls || []
-    );
+      return new Set();
+    }
   }
 
   async saveUrls(
@@ -342,8 +373,16 @@ export class FaissSearchEngine {
       );
 
     urls.forEach(
-      (u) =>
-        existing.add(u)
+      (url) => {
+        const normalized =
+          this.normalizeUrl(url);
+
+        if (normalized) {
+          existing.add(
+            normalized
+          );
+        }
+      }
     );
 
     fs.writeFileSync(
@@ -412,28 +451,40 @@ export class FaissSearchEngine {
     }[] = [];
 
     if (fs.existsSync(file)) {
-      existing =
-        JSON.parse(
-          fs.readFileSync(
-            file,
-            "utf8"
-          )
-        );
+      try {
+        existing =
+          JSON.parse(
+            fs.readFileSync(
+              file,
+              "utf8"
+            )
+          );
+      } catch {
+        existing = [];
+      }
     }
 
     const map =
-      new Map(
-        existing.map(
-          (t) => [
-            t.url,
-            t,
-          ]
-        )
+      new Map<
+        string,
+        {
+          title: string;
+          url: string;
+          tabId?: number;
+          windowId?: number;
+        }
+      >();
+
+    for (const tab of existing) {
+      map.set(
+        this.normalizeUrl(tab.url),
+        tab
       );
+    }
 
     for (const tab of tabs) {
       map.set(
-        tab.url,
+        this.normalizeUrl(tab.url),
         tab
       );
     }
@@ -471,15 +522,15 @@ export class FaissSearchEngine {
         )
       );
 
+    const target =
+      this.normalizeUrl(url);
+
     const filtered =
       tabs.filter(
-        (t: any) =>
+        (tab: any) =>
           this.normalizeUrl(
-            t.url
-          ) !==
-          this.normalizeUrl(
-            url
-          )
+            tab.url
+          ) !== target
       );
 
     fs.writeFileSync(
@@ -513,18 +564,17 @@ export class FaissSearchEngine {
         )
       );
 
+    const target =
+      this.normalizeUrl(url);
+
     json.urls =
-      (
-        json.urls || []
-      ).filter(
-        (u: string) =>
-          this.normalizeUrl(
-            u
-          ) !==
-          this.normalizeUrl(
-            url
-          )
-      );
+      (json.urls || [])
+        .filter(
+          (savedUrl: string) =>
+            this.normalizeUrl(
+              savedUrl
+            ) !== target
+        );
 
     fs.writeFileSync(
       file,
@@ -548,12 +598,16 @@ export class FaissSearchEngine {
       return [];
     }
 
-    return JSON.parse(
-      fs.readFileSync(
-        file,
-        "utf8"
-      )
-    );
+    try {
+      return JSON.parse(
+        fs.readFileSync(
+          file,
+          "utf8"
+        )
+      );
+    } catch {
+      return [];
+    }
   }
 
   async deleteByUrl(
@@ -581,15 +635,15 @@ export class FaissSearchEngine {
       store.getDocstore();
 
     const target =
-      this.normalizeUrl(
-        url
-      );
+      this.normalizeUrl(url);
 
     const ids: string[] = [];
 
     for (
-      const [id, doc] of
-      docstore._docs.entries()
+      const [
+        id,
+        doc,
+      ] of docstore._docs.entries()
     ) {
       if (
         this.normalizeUrl(
@@ -630,14 +684,57 @@ export class FaissSearchEngine {
       return "";
     }
 
-    return input
-      .split("?")[0]
-      .replace(/\/$/, "")
-      .replace(
-        /^https?:\/\/(www\.)?/,
-        ""
-      )
-      .toLowerCase();
+    try {
+      const parsed =
+        new URL(input);
+
+      parsed.hash = "";
+      parsed.search = "";
+
+      let hostname =
+        parsed.hostname.toLowerCase();
+
+      if (
+        hostname.startsWith(
+          "www."
+        )
+      ) {
+        hostname =
+          hostname.slice(4);
+      }
+
+      let pathname =
+        parsed.pathname;
+
+      if (
+        pathname.length > 1 &&
+        pathname.endsWith("/")
+      ) {
+        pathname =
+          pathname.slice(
+            0,
+            -1
+          );
+      }
+
+      return (
+        hostname +
+        pathname
+      ).toLowerCase();
+    } catch {
+      return input
+        .split("?")[0]
+        .split("#")[0]
+        .replace(
+          /\/$/,
+          ""
+        )
+        .replace(
+          /^https?:\/\/(www\.)?/i,
+          ""
+        )
+        .toLowerCase();
+    }
   }
 
   async search(
@@ -673,21 +770,12 @@ export class FaissSearchEngine {
           docstore._docs
         ).length;
 
-      /*
-       * IMPORTANT:
-       *
-       * We need enough FAISS results so that
-       * windowId/url filtering does not remove
-       * the documents we actually need.
-       *
-       * Previously we only searched the first
-       * 100 results and THEN applied windowId/url
-       * filters. That could produce an empty result
-       * even when matching documents existed.
-       */
       const searchK =
         Math.max(
-          totalDocuments,
+          Math.min(
+            totalDocuments,
+            500
+          ),
           k * 20,
           100
         );
@@ -771,37 +859,14 @@ export class FaissSearchEngine {
       );
 
       /*
-       * Window scope
-       */
-      if (
-        windowId !== undefined
-      ) {
-        docs =
-          docs.filter(
-            (doc) =>
-              Number(
-                doc.metadata.windowId
-              ) ===
-              Number(windowId)
-          );
-
-        console.log(
-          "🪟 AFTER WINDOW FILTER:",
-          {
-            windowId,
-            count: docs.length,
-          }
-        );
-      }
-
-      /*
-       * URL scope
+       * URL FILTER
+       *
+       * URL is the strongest scope because
+       * chatWidget sends the current page URL.
        */
       if (url) {
         const target =
-          this.normalizeUrl(
-            url
-          );
+          this.normalizeUrl(url);
 
         docs =
           docs.filter(
@@ -821,9 +886,76 @@ export class FaissSearchEngine {
       }
 
       /*
-       * Return only the requested
-       * number of results.
+       * WINDOW FILTER
+       *
+       * IMPORTANT:
+       *
+       * Old FAISS documents may not have
+       * windowId metadata.
+       *
+       * If a document has no windowId,
+       * we must NOT delete it from the
+       * result set.
+       *
+       * Only filter by windowId when
+       * the document actually contains it.
        */
+      if (
+        windowId !== undefined &&
+        docs.some(
+          (doc) =>
+            doc.metadata.windowId !==
+            undefined &&
+            doc.metadata.windowId !==
+            null
+        )
+      ) {
+        docs =
+          docs.filter(
+            (doc) => {
+              const docWindowId =
+                doc.metadata.windowId;
+
+              /*
+               * Keep legacy documents
+               * without windowId.
+               */
+              if (
+                docWindowId ===
+                  undefined ||
+                docWindowId === null
+              ) {
+                return true;
+              }
+
+              return (
+                Number(
+                  docWindowId
+                ) ===
+                Number(windowId)
+              );
+            }
+          );
+
+        console.log(
+          "🪟 AFTER WINDOW FILTER:",
+          {
+            windowId,
+            count: docs.length,
+          }
+        );
+      } else {
+        console.log(
+          "🪟 WINDOW FILTER SKIPPED:",
+          {
+            reason:
+              "No usable windowId metadata found",
+            requestedWindowId:
+              windowId,
+          }
+        );
+      }
+
       const finalDocs =
         docs.slice(
           0,
@@ -926,13 +1058,17 @@ export class FaissSearchEngine {
     }[] = [];
 
     if (fs.existsSync(file)) {
-      existing =
-        JSON.parse(
-          fs.readFileSync(
-            file,
-            "utf8"
-          )
-        );
+      try {
+        existing =
+          JSON.parse(
+            fs.readFileSync(
+              file,
+              "utf8"
+            )
+          );
+      } catch {
+        existing = [];
+      }
     }
 
     fs.writeFileSync(
@@ -957,12 +1093,16 @@ export class FaissSearchEngine {
       return [];
     }
 
-    return JSON.parse(
-      fs.readFileSync(
-        file,
-        "utf8"
-      )
-    );
+    try {
+      return JSON.parse(
+        fs.readFileSync(
+          file,
+          "utf8"
+        )
+      );
+    } catch {
+      return [];
+    }
   }
 
   async clearPendingChunks(
@@ -974,9 +1114,7 @@ export class FaissSearchEngine {
       );
 
     if (fs.existsSync(file)) {
-      fs.unlinkSync(
-        file
-      );
+      fs.unlinkSync(file);
     }
   }
 
