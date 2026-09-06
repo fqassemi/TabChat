@@ -58,6 +58,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 chrome.runtime.onMessage.addListener(
   async (msg, sender, sendResponse) => {
+
+    // Get the current tab's windowId
+    if (msg.action === "getCurrentWindowId") {
+      sendResponse({
+        windowId: sender.tab?.windowId,
+      });
+
+      return true;
+    }
+
     if (msg.type === "chatQuery") {
       try {
         const r = await fetch("http://localhost:8000/chat", {
@@ -74,6 +84,7 @@ chrome.runtime.onMessage.addListener(
         const j = await r.json();
 
         sendResponse(j);
+
       } catch (err) {
         console.error("❌ Chat error:", err);
 
@@ -86,6 +97,7 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 );
+
 
 // =========================
 // 🗂️ Open Tabs Tracking

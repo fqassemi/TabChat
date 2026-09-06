@@ -652,7 +652,13 @@ app.delete("/tabs", requireAuth, async (req: any, res) => {
 
 // ------------------ Chat ------------------
 app.post("/chat", requireAuth, async (req: any, res) => {
-  const { question, url, chatApiKey, chatBaseURL } = req.body;
+  const {
+  question,
+  url,
+  windowId,
+  chatApiKey,
+  chatBaseURL,
+} = req.body;
   const userId = req.userId;
 
   if (!question?.trim()) {
@@ -668,7 +674,14 @@ app.post("/chat", requireAuth, async (req: any, res) => {
     let topResults: any[] = [];
     const engine = await getFaissEngine(userId);
     try {
-      topResults = await engine.search(question, embeddingConfig, userId, 10, url);
+      topResults = await engine.search(
+  question,
+  embeddingConfig,
+  userId,
+  10,
+  url,
+  windowId
+);
 
       if (!topResults.length) {
         return res.json({
@@ -739,7 +752,12 @@ app.post("/chat", requireAuth, async (req: any, res) => {
 
 // ------------------ Search ------------------
 app.post("/search", requireAuth, async (req: any, res) => {
-  const { q, chatApiKey, chatBaseURL } = req.body;
+  const {
+  q,
+  windowId,
+  chatApiKey,
+  chatBaseURL,
+} = req.body;
   const userId = req.userId;
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
   const { embedding: embeddingConfig } = resolveProviders({
@@ -750,7 +768,14 @@ app.post("/search", requireAuth, async (req: any, res) => {
   await runExclusive(userId, async () => {
     const engine = await getFaissEngine(userId);
     try {
-      const results = await engine.search(q, embeddingConfig, userId, 5);
+      const results = await engine.search(
+  q,
+  embeddingConfig,
+  userId,
+  5,
+  undefined,
+  windowId
+);
 
       const cleanResults = results
         .filter((r) => r.text !== "init" && r.metadata?.meta !== "init")

@@ -19,25 +19,25 @@ export class FaissSearchEngine {
   private storage?: StorageProvider;
 
   constructor(
-    basePath="./data/faiss",
+    basePath = "./data/faiss",
     storage?: StorageProvider
-  ){
-    this.basePath=basePath;
+  ) {
+    this.basePath = basePath;
     this.storage = storage;
   }
 
-  private async getUserPath(userId:string){
+  private async getUserPath(userId: string) {
 
-    if(this.storage){
+    if (this.storage) {
 
-        return await this.storage.getLocalPath(userId);
+      return await this.storage.getLocalPath(userId);
 
     }
 
 
     return path.join(
-        this.basePath,
-        userId
+      this.basePath,
+      userId
     );
 
   }
@@ -48,11 +48,11 @@ export class FaissSearchEngine {
     }
 
     if (!this.embedder) {
-          this.embedder = new OpenAIEmbeddings({
-            apiKey: config.apiKey,
-            model: config.model,
-            configuration: config.baseURL ? { baseURL: config.baseURL } : undefined,
-          });
+      this.embedder = new OpenAIEmbeddings({
+        apiKey: config.apiKey,
+        model: config.model,
+        configuration: config.baseURL ? { baseURL: config.baseURL } : undefined,
+      });
     }
 
     const isTemp = this.storage?.isTemporary?.() ?? false;
@@ -162,6 +162,8 @@ export class FaissSearchEngine {
       title: d.metadata?.title || "Untitled",
       url: d.metadata?.url || "",
       part: d.metadata?.part || 1,
+      tabId: d.metadata?.tabId,
+      windowId: d.metadata?.windowId,
     }));
 
     try {
@@ -174,7 +176,7 @@ export class FaissSearchEngine {
       store.mergeFrom(newStore);
 
       await store.save(
-         await this.getUserPath(userId)
+        await this.getUserPath(userId)
       );
       await this.storage?.afterSave(userId);
 
@@ -188,324 +190,348 @@ export class FaissSearchEngine {
       );
     }
   }
-    private async getMetadataPath(userId:string){
+  private async getMetadataPath(userId: string) {
 
-        const base = await this.storage?.getLocalPath(userId)
-            ?? path.join(this.basePath,userId);
+    const base = await this.storage?.getLocalPath(userId)
+      ?? path.join(this.basePath, userId);
 
 
-        return path.join(
-            path.dirname(base),
-            `${userId}-metadata.json`
-        );
+    return path.join(
+      path.dirname(base),
+      `${userId}-metadata.json`
+    );
 
+  }
+
+  async getExistingUrls(userId: string): Promise<Set<string>> {
+    const file = await this.getMetadataPath(userId);
+
+    if (!fs.existsSync(file)) {
+      return new Set();
     }
 
-    async getExistingUrls(userId: string): Promise<Set<string>> {
-      const file = await this.getMetadataPath(userId);
+    const json = JSON.parse(fs.readFileSync(file, "utf8"));
 
-      if (!fs.existsSync(file)) {
-        return new Set();
-      }
+    return new Set(json.urls || []);
+  }
 
-      const json = JSON.parse(fs.readFileSync(file, "utf8"));
+  async saveUrls(userId: string, urls: string[]) {
+    const file = await this.getMetadataPath(userId);
+    const dir = path.dirname(file);
 
-      return new Set(json.urls || []);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
 
-    async saveUrls(userId: string, urls: string[]) {
-      const file = await this.getMetadataPath(userId);
-      const dir = path.dirname(file);
+    const existing = await this.getExistingUrls(userId);
 
-      if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-      }
+    urls.forEach((u) => existing.add(u));
 
-      const existing = await this.getExistingUrls(userId);
+    fs.writeFileSync(
+      file,
+      JSON.stringify(
+        {
+          urls: [...existing],
+        },
+        null,
+        2
+      )
+    );
+  }
 
-      urls.forEach((u) => existing.add(u));
+  private async getTabsPath(userId: string) {
 
-      fs.writeFileSync(
-        file,
-        JSON.stringify(
-          {
-            urls: [...existing],
-          },
-          null,
-          2
-        )
-      );
-    }
-
-    private async getTabsPath(userId:string){
-
-        const base = await this.storage?.getLocalPath(userId)
-            ?? path.join(this.basePath,userId);
+    const base = await this.storage?.getLocalPath(userId)
+      ?? path.join(this.basePath, userId);
 
 
-        return path.join(
-            path.dirname(base),
-            `${userId}-tabs.json`
-        );
+    return path.join(
+      path.dirname(base),
+      `${userId}-tabs.json`
+    );
 
-    }
+  }
 
-    async saveTabs(
-      userId: string,
-      tabs: {
-        title: string;
-        url: string;
-      }[]
-    ) {
-      const file = await this.getTabsPath(userId);
-      const dir = path.dirname(file);
-
-      if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-      }
-
-      let existing: {
-        title: string;
-        url: string;
-      }[] = [];
-
-      if (fs.existsSync(file)) {
-        existing = JSON.parse(fs.readFileSync(file, "utf8"));
-      }
-
-      const map = new Map(
-        existing.map((t) => [t.url, t])
-      );
-
-      for (const tab of tabs) {
-        map.set(tab.url, tab);
-      }
-
-      fs.writeFileSync(
-        file,
-        JSON.stringify(
-          [...map.values()],
-          null,
-          2
-        )
-      );
-    }
-
-    async deleteTab(userId: string, url: string) {
-        const file = await this.getTabsPath(userId);
-
-        if (!fs.existsSync(file)) return;
-
-        const tabs = JSON.parse(fs.readFileSync(file, "utf8"));
-
-        const filtered = tabs.filter(
-            (t: any) => this.normalizeUrl(t.url) !== this.normalizeUrl(url)
-        );
-
-        fs.writeFileSync(
-            file,
-            JSON.stringify(filtered, null, 2)
-        );
-    }
-
-
-    async deleteUrl(userId: string, url: string) {
-        const file = await this.getMetadataPath(userId);
-
-        if (!fs.existsSync(file)) return;
-
-        const json = JSON.parse(
-            fs.readFileSync(file, "utf8")
-        );
-
-        json.urls = (json.urls || []).filter(
-            (u: string) =>
-                this.normalizeUrl(u) !== this.normalizeUrl(url)
-        );
-
-        fs.writeFileSync(
-            file,
-            JSON.stringify(json, null, 2)
-        );
-    }
-
-    async getTabs(userId: string) {
-      const file = await this.getTabsPath(userId);
-
-      if (!fs.existsSync(file)) {
-        return [];
-      }
-
-      return JSON.parse(
-        fs.readFileSync(file, "utf8")
-      );
-    }
-
-    async deleteByUrl(
-      userId: string,
-      config: EmbeddingConfig,
-      url: string
-    ) {
-      await this.init(config, userId);
-
-      const store = this.stores.get(userId);
-
-      if (!store) {
-        throw new Error("Store not initialized");
-      }
-
-      const docstore = store.getDocstore();
-
-      const target = this.normalizeUrl(url);
-
-      const ids: string[] = [];
-
-      for (const [id, doc] of docstore._docs.entries()) {
-        if (this.normalizeUrl(doc.metadata?.url) === target) {
-          ids.push(id);
-        }
-      }
-
-      console.log(`Deleting ${ids.length} vectors`);
-
-      if (ids.length === 0) return;
-
-      await store.delete({ ids });
-
-      await store.save(
-          await this.getUserPath(userId)
-      );
-      await this.storage?.afterSave(userId);
-    }
-
-    private normalizeUrl(input?: string) {
-      if (!input) return "";
-
-      return input
-        .split("?")[0]
-        .replace(/\/$/, "")
-        .replace(/^https?:\/\/(www\.)?/, "")
-        .toLowerCase();
-    }
-
-  async search(
-    query: string,
-    config: EmbeddingConfig,
+  async saveTabs(
     userId: string,
-    k = 5,
-    url?: string
+    tabs: {
+      title: string;
+      url: string;
+      tabId?: number;
+      windowId?: number;
+    }[]
+
+  ) {
+    const file = await this.getTabsPath(userId);
+    const dir = path.dirname(file);
+
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    let existing: {
+      title: string;
+      url: string;
+    }[] = [];
+
+    if (fs.existsSync(file)) {
+      existing = JSON.parse(fs.readFileSync(file, "utf8"));
+    }
+
+    const map = new Map(
+      existing.map((t) => [t.url, t])
+    );
+
+    for (const tab of tabs) {
+      map.set(tab.url, tab);
+    }
+
+    fs.writeFileSync(
+      file,
+      JSON.stringify(
+        [...map.values()],
+        null,
+        2
+      )
+    );
+  }
+
+  async deleteTab(userId: string, url: string) {
+    const file = await this.getTabsPath(userId);
+
+    if (!fs.existsSync(file)) return;
+
+    const tabs = JSON.parse(fs.readFileSync(file, "utf8"));
+
+    const filtered = tabs.filter(
+      (t: any) => this.normalizeUrl(t.url) !== this.normalizeUrl(url)
+    );
+
+    fs.writeFileSync(
+      file,
+      JSON.stringify(filtered, null, 2)
+    );
+  }
+
+
+  async deleteUrl(userId: string, url: string) {
+    const file = await this.getMetadataPath(userId);
+
+    if (!fs.existsSync(file)) return;
+
+    const json = JSON.parse(
+      fs.readFileSync(file, "utf8")
+    );
+
+    json.urls = (json.urls || []).filter(
+      (u: string) =>
+        this.normalizeUrl(u) !== this.normalizeUrl(url)
+    );
+
+    fs.writeFileSync(
+      file,
+      JSON.stringify(json, null, 2)
+    );
+  }
+
+  async getTabs(userId: string) {
+    const file = await this.getTabsPath(userId);
+
+    if (!fs.existsSync(file)) {
+      return [];
+    }
+
+    return JSON.parse(
+      fs.readFileSync(file, "utf8")
+    );
+  }
+
+  async deleteByUrl(
+    userId: string,
+    config: EmbeddingConfig,
+    url: string
   ) {
     await this.init(config, userId);
 
     const store = this.stores.get(userId);
 
     if (!store) {
-      throw new Error(
-        `FAISS store not found for user ${userId}`
-      );
+      throw new Error("Store not initialized");
     }
 
-    try {
-      const results = await store.similaritySearchWithScore(
+    const docstore = store.getDocstore();
+
+    const target = this.normalizeUrl(url);
+
+    const ids: string[] = [];
+
+    for (const [id, doc] of docstore._docs.entries()) {
+      if (this.normalizeUrl(doc.metadata?.url) === target) {
+        ids.push(id);
+      }
+    }
+
+    console.log(`Deleting ${ids.length} vectors`);
+
+    if (ids.length === 0) return;
+
+    await store.delete({ ids });
+
+    await store.save(
+      await this.getUserPath(userId)
+    );
+    await this.storage?.afterSave(userId);
+  }
+
+  private normalizeUrl(input?: string) {
+    if (!input) return "";
+
+    return input
+      .split("?")[0]
+      .replace(/\/$/, "")
+      .replace(/^https?:\/\/(www\.)?/, "")
+      .toLowerCase();
+  }
+
+async search(
+  query: string,
+  config: EmbeddingConfig,
+  userId: string,
+  k = 5,
+  url?: string,
+  windowId?: number
+) {
+  await this.init(config, userId);
+
+  const store = this.stores.get(userId);
+
+  if (!store) {
+    throw new Error(
+      `FAISS store not found for user ${userId}`
+    );
+  }
+
+  try {
+    const searchK =
+      windowId !== undefined
+        ? Math.max(k * 20, 100)
+        : k * 5;
+
+    const results =
+      await store.similaritySearchWithScore(
         query,
-        k * 5
+        searchK
       );
 
-      if (!results.length) {
-          console.warn(`⚠️ No FAISS results for user ${userId}`);
-          return [];
-      }
-
-      let docs = results
-        .filter(
-            ([doc]) =>
-            doc.pageContent !== "init" &&
-            doc.metadata?.meta !== "init"
-        )
-        .map(([doc, score]) => ({
-            text: doc.pageContent,
-            metadata: {
-                userId: doc.metadata?.userId,
-                title: doc.metadata?.title || "Untitled",
-                url: doc.metadata?.url || "",
-                part: doc.metadata?.part || 1,
-            },
-            score,
-        }));
-
-      // Optional URL filter
-      if (url) {
-        const target = this.normalizeUrl(url);
-
-        docs = docs.filter((d) => {
-            return this.normalizeUrl(d.metadata.url) === target;
-        });
-      }
-
-      return docs;
-
-    } catch (err) {
-      console.error(
-        "❌ FAISS search failed:",
-        err
+    if (!results.length) {
+      console.warn(
+        `⚠️ No FAISS results for user ${userId}`
       );
       return [];
     }
+
+    let docs = results
+      .filter(
+        ([doc]) =>
+          doc.pageContent !== "init" &&
+          doc.metadata?.meta !== "init"
+      )
+      .map(([doc, score]) => ({
+        text: doc.pageContent,
+        metadata: {
+          userId: doc.metadata?.userId,
+          title: doc.metadata?.title || "Untitled",
+          url: doc.metadata?.url || "",
+          part: doc.metadata?.part || 1,
+          tabId: doc.metadata?.tabId,
+          windowId: doc.metadata?.windowId,
+        },
+        score,
+      }));
+
+    // Window scope
+    if (windowId !== undefined) {
+      docs = docs.filter((doc) => {
+        return doc.metadata.windowId === windowId;
+      });
+    }
+
+    // URL scope
+    if (url) {
+      const target = this.normalizeUrl(url);
+
+      docs = docs.filter((doc) => {
+        return (
+          this.normalizeUrl(doc.metadata.url) === target
+        );
+      });
+    }
+
+    // Return only the requested number of results
+    return docs.slice(0, k);
+  } catch (err) {
+    console.error(
+      "❌ FAISS search failed:",
+      err
+    );
+
+    return [];
   }
-async syncStorage(userId:string){
+}
+  async syncStorage(userId: string) {
 
     await this.storage?.afterSave(userId);
 
-}
+  }
 
-isTemporary() {
+  isTemporary() {
     return this.storage?.isTemporary?.() ?? false;
-}
+  }
 
-async cleanup(userId: string) {
+  async cleanup(userId: string) {
     this.stores.delete(userId);
     await this.storage?.cleanup(userId);
-}
+  }
 
 
-private async getPendingPath(userId: string) {
-  const base = await this.storage?.getLocalPath(userId)
-    ?? path.join(this.basePath, userId);
+  private async getPendingPath(userId: string) {
+    const base = await this.storage?.getLocalPath(userId)
+      ?? path.join(this.basePath, userId);
 
-  return path.join(path.dirname(base), `${userId}-pending.json`);
-}
+    return path.join(path.dirname(base), `${userId}-pending.json`);
+  }
 
-async savePendingChunks(
-  userId: string,
-  chunks: { text: string; metadata: any }[]
-) {
-  const file = await this.getPendingPath(userId);
-  const dir = path.dirname(file);
+  async savePendingChunks(
+    userId: string,
+    chunks: { text: string; metadata: any }[]
+  ) {
+    const file = await this.getPendingPath(userId);
+    const dir = path.dirname(file);
 
-  if (!fs.existsSync(dir)) {
+    if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+    }
+
+    let existing: { text: string; metadata: any }[] = [];
+    if (fs.existsSync(file)) {
+      existing = JSON.parse(fs.readFileSync(file, "utf8"));
+    }
+
+    fs.writeFileSync(file, JSON.stringify(existing.concat(chunks)));
   }
 
-  let existing: { text: string; metadata: any }[] = [];
-  if (fs.existsSync(file)) {
-    existing = JSON.parse(fs.readFileSync(file, "utf8"));
+  async getPendingChunks(userId: string) {
+    const file = await this.getPendingPath(userId);
+    if (!fs.existsSync(file)) return [];
+    return JSON.parse(fs.readFileSync(file, "utf8"));
   }
 
-  fs.writeFileSync(file, JSON.stringify(existing.concat(chunks)));
-}
+  async clearPendingChunks(userId: string) {
+    const file = await this.getPendingPath(userId);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
 
-async getPendingChunks(userId: string) {
-  const file = await this.getPendingPath(userId);
-  if (!fs.existsSync(file)) return [];
-  return JSON.parse(fs.readFileSync(file, "utf8"));
-}
-
-async clearPendingChunks(userId: string) {
-  const file = await this.getPendingPath(userId);
-  if (fs.existsSync(file)) fs.unlinkSync(file);
-}
-
-async prepareStorage(userId: string) {
+  async prepareStorage(userId: string) {
     await this.storage?.beforeLoad(userId);
-}
+  }
 }
