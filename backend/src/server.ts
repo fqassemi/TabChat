@@ -440,6 +440,8 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
                   title: doc.title || "Untitled",
                   url: doc.url,
                   part: i + 1,
+                  tabId:doc.id,
+                  windowId:doc.windowId
               },
           })
         );
@@ -461,7 +463,7 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
     // (تا اگه یوزر دوباره Collect بزنه، این تب‌ها دوباره اسکرپ نشن)
     await engine.savePendingChunks(userId, allChunksToIndex);
     await engine.saveUrls(userId, uniqueDocs.map((d) => d.url));
-    await engine.saveTabs(userId, uniqueDocs.map((d) => ({ title: d.title || "Untitled", url: d.url })));
+    await engine.saveTabs(userId,uniqueDocs.map((d) => ({title: d.title || "Untitled",url: d.url,tabId: d.id,windowId: d.windowId,})));
     await engine.syncStorage(userId); // آپلود metadata/tabs/pending برای SCP
 
     ingestProgress.set(userId, {
