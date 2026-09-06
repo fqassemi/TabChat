@@ -605,6 +605,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     id: t.id,
                     windowId: t.windowId,
                 }));
+                console.log("📦 Docs:", docs);
 
 
 
