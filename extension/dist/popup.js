@@ -597,25 +597,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 );
 
             const docs = tabs
-
-                .filter((t) =>
-                    t.url?.startsWith("http")
-                )
-
-                .filter((t) =>
-                    !isExcludedUrl(t.url)
-                )
-
+                .filter((t) => t.url?.startsWith("http"))
+                .filter((t) => !isExcludedUrl(t.url))
                 .map((t) => ({
-                    title:
-                        t.title || "",
-
-                    url:
-                        t.url,
-
-                    id:
-                        t.id,
+                    title: t.title || "",
+                    url: t.url,
+                    id: t.id,
+                    windowId: t.windowId,
                 }));
+
+
 
             try {
 
@@ -1267,8 +1258,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         )
                         .forEach(
                             (cb) =>
-                                (cb.checked =
-                                    true)
+                            (cb.checked =
+                                true)
                         );
                 }
             );
@@ -1287,8 +1278,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         )
                         .forEach(
                             (cb) =>
-                                (cb.checked =
-                                    false)
+                            (cb.checked =
+                                false)
                         );
                 }
             );
@@ -1359,7 +1350,7 @@ document.addEventListener("DOMContentLoaded", () => {
                                 chrome.tabs
                                     .remove(id)
                                     .catch(
-                                        () => {}
+                                        () => { }
                                     )
                         )
                     );
