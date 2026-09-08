@@ -412,16 +412,16 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
           if ((buffer + "\n\n" + trimmed).length > maxLen) {
             if (buffer.trim().length > 30) chunks.push(buffer.trim());
             if (trimmed.length > maxLen) {
-                if (buffer.trim()) {
-                    chunks.push(buffer.trim());
-                    buffer = "";
-                }
+              if (buffer.trim()) {
+                chunks.push(buffer.trim());
+                buffer = "";
+              }
 
-                for (let i = 0; i < trimmed.length; i += maxLen) {
-                    chunks.push(trimmed.slice(i, i + maxLen));
-                }
+              for (let i = 0; i < trimmed.length; i += maxLen) {
+                chunks.push(trimmed.slice(i, i + maxLen));
+              }
 
-                continue;
+              continue;
             }
 
             buffer = trimmed;
@@ -435,14 +435,14 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
         countTabs++;
         chunks.forEach((chunk, i) =>
           allChunksToIndex.push({
-              text: chunk,
-              metadata: {
-                  title: doc.title || "Untitled",
-                  url: doc.url,
-                  part: i + 1,
-                  tabId:doc.id,
-                  windowId:doc.windowId
-              },
+            text: chunk,
+            metadata: {
+              title: doc.title || "Untitled",
+              url: doc.url,
+              part: i + 1,
+              tabId: doc.id,
+              windowId: doc.windowId
+            },
           })
         );
         processed++;
@@ -463,13 +463,13 @@ app.post("/ingest", requireAuth, async (req: any, res) => {
     // (تا اگه یوزر دوباره Collect بزنه، این تب‌ها دوباره اسکرپ نشن)
     await engine.savePendingChunks(userId, allChunksToIndex);
     await engine.saveUrls(userId, uniqueDocs.map((d) => d.url));
-    await engine.saveTabs(userId,uniqueDocs.map((d) => ({title: d.title || "Untitled",url: d.url,tabId: d.id,windowId: d.windowId,})));
+    await engine.saveTabs(userId, uniqueDocs.map((d) => ({ title: d.title || "Untitled", url: d.url, tabId: d.id, windowId: d.windowId, })));
     await engine.syncStorage(userId); // آپلود metadata/tabs/pending برای SCP
 
     ingestProgress.set(userId, {
-          processed: uniqueDocs.length,
-          total: uniqueDocs.length,
-          done: true,
+      processed: uniqueDocs.length,
+      total: uniqueDocs.length,
+      done: true,
     });
 
     res.json({
@@ -653,12 +653,13 @@ app.delete("/tabs", requireAuth, async (req: any, res) => {
 // ------------------ Chat ------------------
 app.post("/chat", requireAuth, async (req: any, res) => {
   const {
-  question,
-  url,
-  windowId,
-  chatApiKey,
-  chatBaseURL,
-} = req.body;
+    question,
+    url,
+    windowId,
+    pins,
+    chatApiKey,
+    chatBaseURL,
+  } = req.body;
   const userId = req.userId;
 
   if (!question?.trim()) {
@@ -675,21 +676,27 @@ app.post("/chat", requireAuth, async (req: any, res) => {
     const engine = await getFaissEngine(userId);
     try {
       topResults = await engine.search(
-  question,
-  embeddingConfig,
-  userId,
-  10,
-  url,
-  windowId
-);
+        question,
+        embeddingConfig,
+        userId,
+        10,
+        url,
+        windowId
+      );
 
-      if (!topResults.length) {
+      const hasPinnedText =
+        Array.isArray(pins) &&
+        pins.some(
+          (pin: any) =>
+            typeof pin?.text === "string" && pin.text.trim().length > 0
+        );
+
+      if (!topResults.length && !hasPinnedText) {
         return res.json({
           answer:
             "I couldn't find any indexed content for this page. Please collect this page first.",
         });
       }
-
       const MAX_CHUNK_SIZE = 1200;
       const context = topResults
         .map((r) => (r.text || "").slice(0, MAX_CHUNK_SIZE))
@@ -700,6 +707,17 @@ app.post("/chat", requireAuth, async (req: any, res) => {
         context.length > MAX_CONTEXT_SIZE
           ? context.slice(0, MAX_CONTEXT_SIZE)
           : context;
+
+
+      const pinnedContext = Array.isArray(pins)
+        ? pins
+          .filter((pin: any) => typeof pin?.text === "string")
+          .map((pin: any) => pin.text.trim())
+          .filter(Boolean)
+          .join("\n\n")
+        : "";
+
+
 
       console.log("===== Chat Config =====");
       console.log("API Key:", chatConfig.apiKey?.slice(0, 8) + "...");
@@ -724,7 +742,16 @@ app.post("/chat", requireAuth, async (req: any, res) => {
         },
         {
           role: "user",
-          content: `Context:\n${safeContext}\n\nQuestion: ${question}`,
+          content: `
+Pinned Text:
+${pinnedContext || "(No pinned text)"}
+
+Page Context:
+${safeContext}
+
+Question:
+${question}
+`,
         },
       ]);
 
@@ -753,11 +780,11 @@ app.post("/chat", requireAuth, async (req: any, res) => {
 // ------------------ Search ------------------
 app.post("/search", requireAuth, async (req: any, res) => {
   const {
-  q,
-  windowId,
-  chatApiKey,
-  chatBaseURL,
-} = req.body;
+    q,
+    windowId,
+    chatApiKey,
+    chatBaseURL,
+  } = req.body;
   const userId = req.userId;
   if (!q?.trim()) return res.status(400).json({ ok: false, error: "Query required" });
   const { embedding: embeddingConfig } = resolveProviders({
@@ -769,13 +796,13 @@ app.post("/search", requireAuth, async (req: any, res) => {
     const engine = await getFaissEngine(userId);
     try {
       const results = await engine.search(
-  q,
-  embeddingConfig,
-  userId,
-  5,
-  undefined,
-  windowId
-);
+        q,
+        embeddingConfig,
+        userId,
+        5,
+        undefined,
+        windowId
+      );
 
       const cleanResults = results
         .filter((r) => r.text !== "init" && r.metadata?.meta !== "init")
@@ -817,28 +844,28 @@ app.post(
     } = req.body;
 
     try {
-       if (type === "scp") {
-         if (!host || !username || !remote_path) {
-           return res.status(400).json({
-             ok: false,
-             error: "❌ Host, username, and remote path are required.",
-           });
-         }
+      if (type === "scp") {
+        if (!host || !username || !remote_path) {
+          return res.status(400).json({
+            ok: false,
+            error: "❌ Host, username, and remote path are required.",
+          });
+        }
 
-         const { ScpStorageProvider } =
-             await import("./storage/ScpStorageProvider.ts");
-
-
-         const storage = new ScpStorageProvider({
-             host,
-             username,
-             password,
-             remote_path
-         });
+        const { ScpStorageProvider } =
+          await import("./storage/ScpStorageProvider.ts");
 
 
-         await storage.validate();
-       }
+        const storage = new ScpStorageProvider({
+          host,
+          username,
+          password,
+          remote_path
+        });
+
+
+        await storage.validate();
+      }
 
       await saveUserStorage(
         userId,

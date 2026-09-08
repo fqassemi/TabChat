@@ -387,9 +387,8 @@
 
       msg.textContent = text;
 
-      msg.className = `cw-bubble ${
-        fromUser ? "user" : "bot"
-      } ${rtl ? "rtl" : "ltr"}`;
+      msg.className = `cw-bubble ${fromUser ? "user" : "bot"
+        } ${rtl ? "rtl" : "ltr"}`;
 
       messages.appendChild(msg);
       messages.scrollTop = messages.scrollHeight;
@@ -563,6 +562,17 @@
           windowId
         );
 
+        // ===== GET CURRENT PAGE PINS =====
+        const pinResult = await chrome.storage.local.get("pins");
+
+        const pins = (pinResult.pins || []).filter(
+          (pin) =>
+            pin.url === window.location.href &&
+            Number(pin.windowId) === Number(windowId)
+        );
+
+        console.log("📌 Current page pins:", pins);
+
         // ===== CHAT REQUEST =====
         const response = await fetch(
           "https://tabchat-production-f7d0.up.railway.app/chat",
@@ -576,6 +586,7 @@
               question,
               url: window.location.href,
               windowId,
+              pins,
               chatApiKey: storage.chatApiKey,
               chatBaseURL: storage.chatBaseUrl,
             }),

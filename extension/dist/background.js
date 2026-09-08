@@ -38,6 +38,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     url: tab.url,
     title: tab.title || "Untitled",
     tabId: tab.id ?? null,
+    windowId: tab.windowId ?? null,
     timestamp: new Date().toISOString(),
   };
 

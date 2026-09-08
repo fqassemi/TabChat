@@ -133,132 +133,132 @@ document.addEventListener("DOMContentLoaded", () => {
     // ------------------ LOGIN (FIXED FLOW) ------------------
     // ------------------ GOOGLE LOGIN ------------------
 
-let googleLoginInProgress = false;
+    let googleLoginInProgress = false;
 
-loginBtn.addEventListener("click", async () => {
-    if (googleLoginInProgress) {
-        console.warn("⚠️ Google login already in progress.");
-        return;
-    }
-
-    googleLoginInProgress = true;
-    loginBtn.disabled = true;
-    loginBtn.style.opacity = "0.6";
-    loginBtn.style.pointerEvents = "none";
-
-    try {
-        const redirectURL = chrome.identity.getRedirectURL("auth");
-
-        const authURL =
-            `${SERVER}/auth/google/login` +
-            `?redirect_uri=${encodeURIComponent(redirectURL)}`;
-
-        console.log("🔐 Starting Google login...");
-        console.log("↪️ Redirect URL:", redirectURL);
-
-        const result = await new Promise((resolve, reject) => {
-            chrome.identity.launchWebAuthFlow(
-                {
-                    url: authURL,
-                    interactive: true,
-                },
-                (responseUrl) => {
-                    const error = chrome.runtime.lastError;
-
-                    if (error) {
-                        reject(new Error(error.message));
-                        return;
-                    }
-
-                    if (!responseUrl) {
-                        reject(new Error("No auth result received."));
-                        return;
-                    }
-
-                    resolve(responseUrl);
-                }
-            );
-        });
-
-        console.log("✅ Auth flow completed.");
-
-        const callbackUrl = new URL(result);
-
-        const hash = callbackUrl.hash.startsWith("#")
-            ? callbackUrl.hash.substring(1)
-            : callbackUrl.hash;
-
-        const params = new URLSearchParams(hash);
-
-        const token = params.get("token");
-        const email = params.get("email");
-        const name = params.get("name");
-
-        console.log("🔑 Token received:", !!token);
-        console.log("📧 Email:", email);
-        console.log("👤 Name:", name);
-
-        if (!token) {
-            throw new Error("Token not found in Google callback.");
+    loginBtn.addEventListener("click", async () => {
+        if (googleLoginInProgress) {
+            console.warn("⚠️ Google login already in progress.");
+            return;
         }
 
-        await new Promise((resolve, reject) => {
-            chrome.storage.local.set(
-                {
-                    token: token,
-                    userEmail: email || "",
-                    userName: name || "",
-                },
-                () => {
-                    const error = chrome.runtime.lastError;
+        googleLoginInProgress = true;
+        loginBtn.disabled = true;
+        loginBtn.style.opacity = "0.6";
+        loginBtn.style.pointerEvents = "none";
 
-                    if (error) {
-                        reject(new Error(error.message));
-                        return;
+        try {
+            const redirectURL = chrome.identity.getRedirectURL("auth");
+
+            const authURL =
+                `${SERVER}/auth/google/login` +
+                `?redirect_uri=${encodeURIComponent(redirectURL)}`;
+
+            console.log("🔐 Starting Google login...");
+            console.log("↪️ Redirect URL:", redirectURL);
+
+            const result = await new Promise((resolve, reject) => {
+                chrome.identity.launchWebAuthFlow(
+                    {
+                        url: authURL,
+                        interactive: true,
+                    },
+                    (responseUrl) => {
+                        const error = chrome.runtime.lastError;
+
+                        if (error) {
+                            reject(new Error(error.message));
+                            return;
+                        }
+
+                        if (!responseUrl) {
+                            reject(new Error("No auth result received."));
+                            return;
+                        }
+
+                        resolve(responseUrl);
                     }
+                );
+            });
 
-                    resolve();
-                }
-            );
-        });
+            console.log("✅ Auth flow completed.");
 
-        console.log("✅ Login data saved.");
+            const callbackUrl = new URL(result);
 
-        loginStatus.textContent = "✅ Logged in successfully";
-        loginStatus.style.color = "#16a34a";
+            const hash = callbackUrl.hash.startsWith("#")
+                ? callbackUrl.hash.substring(1)
+                : callbackUrl.hash;
 
-        await updateLoginUI();
+            const params = new URLSearchParams(hash);
 
-    } catch (error) {
-        console.error("❌ Google login failed:", error);
+            const token = params.get("token");
+            const email = params.get("email");
+            const name = params.get("name");
 
-        if (
-            error.message &&
-            error.message.includes("Only one web auth flow is allowed")
-        ) {
-            loginStatus.textContent =
-                "⚠️ Another Google login is already in progress.";
-        } else if (
-            error.message &&
-            error.message.includes("canceled")
-        ) {
-            loginStatus.textContent = "Google login was canceled.";
-        } else {
-            loginStatus.textContent =
-                "❌ Google login failed. Please try again.";
+            console.log("🔑 Token received:", !!token);
+            console.log("📧 Email:", email);
+            console.log("👤 Name:", name);
+
+            if (!token) {
+                throw new Error("Token not found in Google callback.");
+            }
+
+            await new Promise((resolve, reject) => {
+                chrome.storage.local.set(
+                    {
+                        token: token,
+                        userEmail: email || "",
+                        userName: name || "",
+                    },
+                    () => {
+                        const error = chrome.runtime.lastError;
+
+                        if (error) {
+                            reject(new Error(error.message));
+                            return;
+                        }
+
+                        resolve();
+                    }
+                );
+            });
+
+            console.log("✅ Login data saved.");
+
+            loginStatus.textContent = "✅ Logged in successfully";
+            loginStatus.style.color = "#16a34a";
+
+            await updateLoginUI();
+
+        } catch (error) {
+            console.error("❌ Google login failed:", error);
+
+            if (
+                error.message &&
+                error.message.includes("Only one web auth flow is allowed")
+            ) {
+                loginStatus.textContent =
+                    "⚠️ Another Google login is already in progress.";
+            } else if (
+                error.message &&
+                error.message.includes("canceled")
+            ) {
+                loginStatus.textContent = "Google login was canceled.";
+            } else {
+                loginStatus.textContent =
+                    "❌ Google login failed. Please try again.";
+            }
+
+            loginStatus.style.color = "#dc2626";
+
+        } finally {
+            googleLoginInProgress = false;
+
+            loginBtn.disabled = false;
+            loginBtn.style.opacity = "";
+            loginBtn.style.pointerEvents = "";
         }
+    });
 
-        loginStatus.style.color = "#dc2626";
-
-    } finally {
-        googleLoginInProgress = false;
-
-        loginBtn.disabled = false;
-        loginBtn.style.opacity = "";
-        loginBtn.style.pointerEvents = "";
-    }
-});
-    
     // ------------------ LOGOUT ------------------
     logoutBtn.addEventListener("click", () => {
         chrome.storage.local.remove(["token", "userName", "userEmail"], async () => {
@@ -381,10 +381,11 @@ loginBtn.addEventListener("click", async () => {
             .filter((t) => t.url?.startsWith("http"))
             .filter((t) => !isExcludedUrl(t.url))
             .map((t) => ({
-            title: t.title || "",
-            url: t.url,
-            id: t.id,
-        }));
+                title: t.title || "",
+                url: t.url,
+                id: t.id,
+                windowId: t.windowId,
+            }));
         try {
             progressText.textContent = "0%";
             progressFill.style.width = "0%";
