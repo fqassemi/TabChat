@@ -44,9 +44,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   try {
     const result = await chrome.storage.local.get("pins");
-    console.log("📌 PIN SAVED:", pin);
-    console.log("📌 ALL PINS:", pins);
-
     const pins = result.pins || [];
 
     pins.push(pin);
@@ -55,11 +52,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       pins,
     });
 
-    console.log("📌 Pin saved:", pin);
+    console.log("📌 PIN SAVED:", pin);
+    console.log("📌 ALL PINS:", pins);
   } catch (err) {
     console.error("❌ Failed to save pin:", err);
   }
 });
+
 
 // =========================
 // 💬 Runtime Messages
