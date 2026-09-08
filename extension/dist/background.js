@@ -44,6 +44,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   try {
     const result = await chrome.storage.local.get("pins");
+    console.log("📌 PIN SAVED:", pin);
+    console.log("📌 ALL PINS:", pins);
 
     const pins = result.pins || [];
 
