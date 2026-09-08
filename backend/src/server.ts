@@ -661,6 +661,9 @@ app.post("/chat", requireAuth, async (req: any, res) => {
     chatBaseURL,
   } = req.body;
   const userId = req.userId;
+  console.log("📌 CHAT RECEIVED PINS:", pins);
+console.log("🪟 CHAT WINDOW ID:", windowId);
+console.log("🌐 CHAT URL:", url);
 
   if (!question?.trim()) {
     return res.status(400).json({ answer: "Question required." });
