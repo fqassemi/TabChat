@@ -59,6 +59,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const tabsList = document.getElementById("tabsList");
     const tabsSearch = document.getElementById("tabsSearch");
     const loadMoreBtn = document.getElementById("loadMoreBtn");
+    const myPinsBtn = document.getElementById("myPinsBtn");
+    const pinsContainer = document.getElementById("pinsContainer");
+    const pinsList = document.getElementById("pinsList");
     let allTabs = [];
     let offset = 0;
     const limit = 5;
@@ -707,6 +710,104 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         else {
             tabsContainer.style.display = "none";
+        }
+    });
+
+    // ------------------ MY PINS ------------------
+
+    async function loadPins() {
+        if (!pinsList || !pinsContainer) return;
+
+        const [tab] = await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+        });
+
+        if (!tab?.url || !tab?.windowId) {
+            pinsList.innerHTML = `
+            <div class="pin-empty">
+                No active page found.
+            </div>
+        `;
+            return;
+        }
+
+        const result = await chrome.storage.local.get("pins");
+        const pins = Array.isArray(result.pins) ? result.pins : [];
+
+        const currentPins = pins.filter(
+            (pin) =>
+                pin.url === tab.url &&
+                Number(pin.windowId) === Number(tab.windowId)
+        );
+
+        renderPins(currentPins);
+    }
+
+    function renderPins(pins) {
+        if (!pinsList) return;
+
+        pinsList.innerHTML = "";
+
+        if (pins.length === 0) {
+            pinsList.innerHTML = `
+            <div class="pin-empty">
+                📌 No pins for this page.
+            </div>
+        `;
+            return;
+        }
+
+        pins.forEach((pin) => {
+            const pinItem = document.createElement("div");
+
+            pinItem.className = "pin-item";
+
+            pinItem.innerHTML = `
+            <div class="pin-text"></div>
+            <button class="pin-delete" title="Delete pin">🗑</button>
+        `;
+
+            const text = pinItem.querySelector(".pin-text");
+            const deleteBtn = pinItem.querySelector(".pin-delete");
+
+            text.textContent = pin.text || "";
+
+            deleteBtn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+
+                const result = await chrome.storage.local.get("pins");
+                const allPins = Array.isArray(result.pins)
+                    ? result.pins
+                    : [];
+
+                const updatedPins = allPins.filter(
+                    (item) => item.id !== pin.id
+                );
+
+                await chrome.storage.local.set({
+                    pins: updatedPins,
+                });
+
+                await loadPins();
+            });
+
+            pinsList.appendChild(pinItem);
+        });
+    }
+
+    myPinsBtn?.addEventListener("click", async () => {
+        if (pinsContainer.style.display === "none") {
+            pinsContainer.style.display = "block";
+
+            // Hide My Tabs when My Pins is open
+            if (tabsContainer) {
+                tabsContainer.style.display = "none";
+            }
+
+            await loadPins();
+        } else {
+            pinsContainer.style.display = "none";
         }
     });
 });
