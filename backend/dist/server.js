@@ -496,7 +496,7 @@ app.get("/tabs", requireAuth, async (req, res) => {
     });
 });
 // ------------------ Delete Tab ------------------
-// ------------------ Delete Tab ------------------
+
 
 app.delete("/tabs", requireAuth, async (req, res) => {
     const { url, chatApiKey, chatBaseURL } = req.body;

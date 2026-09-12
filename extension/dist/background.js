@@ -66,25 +66,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 chrome.runtime.onMessage.addListener(
   (msg, sender, sendResponse) => {
-    // =========================
-    // 🪟 Get Current Window ID
-    // =========================
-
-    if (msg.action === "getCurrentWindowId") {
-      const windowId = sender.tab?.windowId;
-
-      console.log("🪟 getCurrentWindowId:", {
-        tabId: sender.tab?.id,
-        windowId,
-        url: sender.tab?.url,
-      });
-
-      sendResponse({
-        windowId,
-      });
-
-      return true;
-    }
 
     // =========================
     // 💬 Chat Query
@@ -96,8 +77,8 @@ chrome.runtime.onMessage.addListener(
           console.log("💬 chatQuery received:", {
             question: msg.question,
             url: msg.url,
-            windowId: msg.windowId,
           });
+
 
           const response = await fetch(
             "https://tabchat-production-f7d0.up.railway.app/chat",
@@ -107,8 +88,8 @@ chrome.runtime.onMessage.addListener(
                 "Content-Type": "application/json",
                 ...(msg.token
                   ? {
-                      Authorization: `Bearer ${msg.token}`,
-                    }
+                    Authorization: `Bearer ${msg.token}`,
+                  }
                   : {}),
               },
               body: JSON.stringify({
