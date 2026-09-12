@@ -530,45 +530,11 @@
           return;
         }
 
-        // ===== GET CURRENT WINDOW ID =====
-        const windowId = await new Promise((resolve) => {
-          chrome.runtime.sendMessage(
-            {
-              action: "getCurrentWindowId",
-            },
-            (response) => {
-              if (chrome.runtime.lastError) {
-                console.error(
-                  "❌ Failed to get windowId:",
-                  chrome.runtime.lastError.message
-                );
-
-                resolve(undefined);
-                return;
-              }
-
-              console.log(
-                "📥 windowId response:",
-                response
-              );
-
-              resolve(response?.windowId);
-            }
-          );
-        });
-
-        console.log(
-          "🪟 Chat windowId:",
-          windowId
-        );
-
         // ===== GET CURRENT PAGE PINS =====
         const pinResult = await chrome.storage.local.get("pins");
 
         const pins = (pinResult.pins || []).filter(
-          (pin) =>
-            pin.url === window.location.href &&
-            Number(pin.windowId) === Number(windowId)
+          (pin) => pin.url === window.location.href
         );
 
         console.log("📌 Current page pins:", pins);
@@ -585,7 +551,6 @@
             body: JSON.stringify({
               question,
               url: window.location.href,
-              windowId,
               pins,
               chatApiKey: storage.chatApiKey,
               chatBaseURL: storage.chatBaseUrl,
